@@ -1,4 +1,4 @@
-name: Build ShaderToggler (MSBuild, x86 & x64)
+name: Build ShaderToggler (auto-detect, x86 & x64)
 
 on:
   push:
@@ -14,31 +14,59 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # Build the Visual Studio project
+      # Find the .vcxproj automatically (prefer ShaderToggler.vcxproj)
+      - name: Locate project
+        id: findproj
+        shell: pwsh
+        run: |
+          $cands = Get-ChildItem -Recurse -Filter *.vcxproj | Select-Object -Expand FullName
+          if (-not $cands) {
+            Write-Error "No .vcxproj found in repository."
+            exit 1
+          }
+          $proj = $cands | Where-Object { $_ -like "*ShaderToggler.vcxproj" } | Select-Object -First 1
+          if (-not $proj) { $proj = $cands | Select-Object -First 1 }
+          Write-Host "Using project: $proj"
+          echo "PROJ=$proj" >> $env:GITHUB_OUTPUT
+
       - name: Build ${{ matrix.platform }} Release
         run: >
-          msbuild "ShaderToggler-1.2.1/src/ShaderToggler.vcxproj"
+          msbuild "${{ steps.findproj.outputs.PROJ }}"
           /p:Configuration=Release
           /p:Platform=${{ matrix.platform }}
 
-      # Copy DLL -> .addon so ReShade can load it
+      # Copy DLL -> .addon next to the DLL
       - name: Package .addon
         shell: pwsh
         run: |
-          $out = if ("${{ matrix.platform }}" -eq "x64") { "ShaderToggler-1.2.1/src/x64/Release" } else { "ShaderToggler-1.2.1/src/Release" }
+          $cfg = "Release"
+          $plat = "${{ matrix.platform }}"
+          # MSBuild default output dirs (commonly either ./x64/Release or ./Release)
+          $out1 = Join-Path (Split-Path "${{ steps.findproj.outputs.PROJ }}") "$plat\$cfg"
+          $out2 = Join-Path (Split-Path "${{ steps.findproj.outputs.PROJ }}") "$cfg"
+          $out = if (Test-Path $out1) { $out1 } elseif (Test-Path $out2) { $out2 } else { "" }
+          if (-not $out) {
+            Write-Host "Searching for ShaderToggler.dll under repo..."
+            $dll = Get-ChildItem -Recurse -Filter ShaderToggler.dll | Where-Object { $_.FullName -match "\\$plat\\$cfg\\|\\$cfg\\" } | Select-Object -First 1
+            if ($dll) { $out = Split-Path $dll.FullName }
+          }
+          if (-not $out) { Write-Error "Could not locate output folder."; exit 1 }
           Copy-Item "$out/ShaderToggler.dll" "$out/ShaderToggler.addon" -Force
+          Write-Host "Output dir: $out"
           Get-ChildItem $out
 
-      # Upload results
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ShaderToggler-${{ matrix.platform }}-Release
           path: |
-            ShaderToggler-1.2.1/src/x64/Release/ShaderToggler.dll
-            ShaderToggler-1.2.1/src/x64/Release/ShaderToggler.addon
-            ShaderToggler-1.2.1/src/Release/ShaderToggler.dll
-            ShaderToggler-1.2.1/src/Release/ShaderToggler.addon
+            **/x64/Release/ShaderToggler.dll
+            **/x64/Release/ShaderToggler.addon
+            **/Win32/Release/ShaderToggler.dll
+            **/Win32/Release/ShaderToggler.addon
+            **/Release/ShaderToggler.dll
+            **/Release/ShaderToggler.addon

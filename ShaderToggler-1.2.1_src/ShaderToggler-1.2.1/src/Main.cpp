@@ -728,8 +728,17 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				bool isDefaultActive = group.isActiveAtStartup();
-				ImGui::Checkbox("Is active at startup", &isDefaultActive);
-				group.setIsActiveAtStartup(isDefaultActive);
+if (ImGui::Checkbox("Is active at startup", &isDefaultActive))
+{
+    group.setIsActiveAtStartup(isDefaultActive);
+    // Persist immediately so it survives restarts without needing the global Save button
+    saveShaderTogglerIniFile();
+}
+else
+{
+    // Still reflect the UI value in the in-memory group
+    group.setIsActiveAtStartup(isDefaultActive);
+}
 				ImGui::PopItemWidth();
 
 				if(!isKeyEditing)

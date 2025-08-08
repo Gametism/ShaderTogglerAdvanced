@@ -1,4 +1,4 @@
-name: Build ShaderToggler (x86 & x64)
+name: Build ShaderToggler (MSBuild, x86 & x64)
 
 on:
   push:
@@ -10,17 +10,35 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        arch: [x64, Win32]
+        platform: [x64, Win32]
+
     steps:
       - uses: actions/checkout@v4
-      - name: Configure CMake
-        run: cmake -S . -B build/${{ matrix.arch }} -A ${{ matrix.arch }}
-      - name: Build
-        run: cmake --build build/${{ matrix.arch }} --config Release
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # Build the Visual Studio project
+      - name: Build ${{ matrix.platform }} Release
+        run: >
+          msbuild "ShaderToggler-1.2.1/src/ShaderToggler.vcxproj"
+          /p:Configuration=Release
+          /p:Platform=${{ matrix.platform }}
+
+      # Copy DLL -> .addon so ReShade can load it
+      - name: Package .addon
+        shell: pwsh
+        run: |
+          $out = if ("${{ matrix.platform }}" -eq "x64") { "ShaderToggler-1.2.1/src/x64/Release" } else { "ShaderToggler-1.2.1/src/Release" }
+          Copy-Item "$out/ShaderToggler.dll" "$out/ShaderToggler.addon" -Force
+          Get-ChildItem $out
+
+      # Upload results
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShaderToggler-${{ matrix.arch }}-Release
+          name: ShaderToggler-${{ matrix.platform }}-Release
           path: |
-            build/${{ matrix.arch }}/Release/ShaderToggler.dll
-            build/${{ matrix.arch }}/Release/ShaderToggler.addon
+            ShaderToggler-1.2.1/src/x64/Release/ShaderToggler.dll
+            ShaderToggler-1.2.1/src/x64/Release/ShaderToggler.addon
+            ShaderToggler-1.2.1/src/Release/ShaderToggler.dll
+            ShaderToggler-1.2.1/src/Release/ShaderToggler.addon

@@ -41,7 +41,6 @@
 #include "ToggleGroup.h"
 #include <vector>
 #include <filesystem>
-#include <atomic>
 
 using namespace reshade::api;
 using namespace ShaderToggler;
@@ -55,7 +54,7 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	uint64_t activeComputeShaderPipeline;
 };
 
-#define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
+#define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250;
 #define HASH_FILE_NAME	"ShaderToggler.ini"
 
 static ShaderToggler::ShaderManager g_pixelShaderManager;
@@ -66,7 +65,6 @@ static atomic_uint32_t g_activeCollectorFrameCounter = 0;
 static std::vector<ToggleGroup> g_toggleGroups;
 static atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static atomic_int g_toggleGroupIdShaderEditing = -1;
-static bool g_defaultActiveForNewGroups = false; // default for new groups
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
@@ -95,8 +93,7 @@ void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
 	toAdd.setToggleKey(VK_CAPITAL, false, false, false);
-	    toAdd.setIsActiveAtStartup(g_defaultActiveForNewGroups);
-g_toggleGroups.push_back(toAdd);
+	g_toggleGroups.push_back(toAdd);
 }
 
 
@@ -112,9 +109,7 @@ void loadShaderTogglerIniFile()
 		// not there
 		return;
 	}
-	    // Load global settings
-    g_defaultActiveForNewGroups = iniFile.GetBool("DefaultActiveForNewGroups", "Settings");
-int groupCounter = 0;
+	int groupCounter = 0;
 	const int numberOfGroups = iniFile.GetInt("AmountGroups", "General");
 	if(numberOfGroups==INT_MIN)
 	{
@@ -145,9 +140,7 @@ void saveShaderTogglerIniFile()
 	// format: first section with # of groups, then per group a section with pixel and vertex shaders, as well as their name and key value.
 	// groups are stored with "Group" + group counter, starting with 0.
 	CDataFile iniFile;
-	    // Save global settings
-    iniFile.SetBool("DefaultActiveForNewGroups", g_defaultActiveForNewGroups, "", "Settings");
-iniFile.SetInt("AmountGroups", g_toggleGroups.size(), "",  "General");
+	iniFile.SetInt("AmountGroups", g_toggleGroups.size(), "",  "General");
 
 	int groupCounter = 0;
 	for(const auto& group: g_toggleGroups)
@@ -624,10 +617,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
 		ImGui::SameLine();
 		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally. Only shaders that are used in the frames collected can be marked.");
-		
-        ImGui::AlignTextToFramePadding();
-        ImGui::Checkbox("New groups active at startup", &g_defaultActiveForNewGroups);
-ImGui::PopItemWidth();
+		ImGui::PopItemWidth();
 	}
 	ImGui::Separator();
 
@@ -774,25 +764,6 @@ ImGui::PopItemWidth();
 		if(g_toggleGroups.size() > 0)
 		{
 			if(ImGui::Button("Save all Toggle Groups"))
-            ImGui::SameLine();
-            if(ImGui::Button("Activate all on next launch"))
-            {
-                for(auto& group : g_toggleGroups)
-                {
-                    group.setIsActiveAtStartup(true);
-                }
-                saveShaderTogglerIniFile();
-            }
-            ImGui::SameLine();
-            if(ImGui::Button("Deactivate all on next launch"))
-            {
-                for(auto& group : g_toggleGroups)
-                {
-                    group.setIsActiveAtStartup(false);
-                }
-                saveShaderTogglerIniFile();
-            }
-
 			{
 				saveShaderTogglerIniFile();
 			}
@@ -801,62 +772,55 @@ ImGui::PopItemWidth();
 }
 
 
-
-// ---- AddonInit/AddonUninit with idempotent guard ----
-static std::atomic_bool g_initialized{false};
-
-static bool DoAddonInit(HMODULE addon_module, HMODULE /*reshade_module*/)
-{
-    if (g_initialized.exchange(true))
-        return true;
-
-    if (!reshade::register_addon(addon_module))
-        return false;
-
-    // Determine INI path (next to the game EXE)
-    WCHAR buf[MAX_PATH];
-    GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    const std::filesystem::path dllPath = std::filesystem::path(buf);
-    const std::filesystem::path basePath = dllPath.parent_path();
-    g_iniFileName = (basePath / HASH_FILE_NAME).string();
-
-    // Hook settings overlay; other events are already registered elsewhere
-    reshade::register_overlay(nullptr, &displaySettings);
-
-    loadShaderTogglerIniFile();
-    return true;
-}
-
-static void DoAddonUninit(HMODULE addon_module, HMODULE /*reshade_module*/)
-{
-    if (!g_initialized.exchange(false))
-        return;
-
-    saveShaderTogglerIniFile();
-    reshade::unregister_overlay(nullptr, &displaySettings);
-    reshade::unregister_addon(addon_module);
-}
-
-extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE reshade_module)
-{
-    return DoAddonInit(addon_module, reshade_module);
-}
-
-extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module, HMODULE reshade_module)
-{
-    DoAddonUninit(addon_module, reshade_module);
-}
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 {
-    switch (fdwReason)
-    {
-    case DLL_PROCESS_ATTACH:
-        DoAddonInit(hModule, nullptr);
-        break;
-    case DLL_PROCESS_DETACH:
-        DoAddonUninit(hModule, nullptr);
-        break;
-    }
-    return TRUE;
-}
+	switch (fdwReason)
+	{
+	case DLL_PROCESS_ATTACH:
+		{
+			if(!reshade::register_addon(hModule))
+			{
+				return FALSE;
+			}
 
+			// We'll pass a nullptr for the module handle so we get the containing process' executable + path. We can't use the reshade's api as we don't have the runtime
+			// and we can't use reshade's handle because under vulkan reshade is stored in a central space and therefore it won't get the folder of the exe (where the reshade dll is located as well).
+			WCHAR buf[MAX_PATH];
+			const std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ? buf : std::filesystem::path();		// <installpath>/shadertoggler.addon64
+			const std::filesystem::path basePath = dllPath.parent_path();																// <installpath>
+			const std::string& hashFileName = HASH_FILE_NAME;
+			g_iniFileName = (basePath / hashFileName).string();																			// <installpath>/shadertoggler.ini
+			reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
+			reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
+			reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+			reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+			reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+			reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+			reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
+			reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+			reshade::register_event<reshade::addon_event::draw>(onDraw);
+			reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+			reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+			reshade::register_overlay(nullptr, &displaySettings);
+			loadShaderTogglerIniFile();
+		}
+		break;
+	case DLL_PROCESS_DETACH:
+		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
+		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
+		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+		reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+		reshade::unregister_event<reshade::addon_event::draw>(onDraw);
+		reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+		reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
+		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+		reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+		reshade::unregister_overlay(nullptr, &displaySettings);
+		reshade::unregister_addon(hModule);
+		break;
+	}
+
+	return TRUE;
+}

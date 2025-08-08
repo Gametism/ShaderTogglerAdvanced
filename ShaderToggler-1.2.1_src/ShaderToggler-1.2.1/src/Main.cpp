@@ -95,8 +95,8 @@ void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
 	toAdd.setToggleKey(VK_CAPITAL, false, false, false);
-	toAdd.setIsActiveAtStartup(g_defaultActiveForNewGroups);
-	g_toggleGroups.push_back(toAdd);
+	    toAdd.setIsActiveAtStartup(g_defaultActiveForNewGroups);
+g_toggleGroups.push_back(toAdd);
 }
 
 
@@ -112,9 +112,8 @@ void loadShaderTogglerIniFile()
 		// not there
 		return;
 	}
-	
-	// Load global settings
-	g_defaultActiveForNewGroups = iniFile.GetBool("DefaultActiveForNewGroups", "Settings");
+	    // Load global settings
+    g_defaultActiveForNewGroups = iniFile.GetBool("DefaultActiveForNewGroups", "Settings");
 int groupCounter = 0;
 	const int numberOfGroups = iniFile.GetInt("AmountGroups", "General");
 	if(numberOfGroups==INT_MIN)
@@ -146,9 +145,8 @@ void saveShaderTogglerIniFile()
 	// format: first section with # of groups, then per group a section with pixel and vertex shaders, as well as their name and key value.
 	// groups are stored with "Group" + group counter, starting with 0.
 	CDataFile iniFile;
-	
-	// Save global settings
-	iniFile.SetBool("DefaultActiveForNewGroups", g_defaultActiveForNewGroups, "", "Settings");
+	    // Save global settings
+    iniFile.SetBool("DefaultActiveForNewGroups", g_defaultActiveForNewGroups, "", "Settings");
 iniFile.SetInt("AmountGroups", g_toggleGroups.size(), "",  "General");
 
 	int groupCounter = 0;
@@ -627,8 +625,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::SameLine();
 		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally. Only shaders that are used in the frames collected can be marked.");
 		
-		ImGui::AlignTextToFramePadding();
-		ImGui::Checkbox("New groups active at startup", &g_defaultActiveForNewGroups);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Checkbox("New groups active at startup", &g_defaultActiveForNewGroups);
 ImGui::PopItemWidth();
 	}
 	ImGui::Separator();
@@ -776,24 +774,24 @@ ImGui::PopItemWidth();
 		if(g_toggleGroups.size() > 0)
 		{
 			if(ImGui::Button("Save all Toggle Groups"))
-			ImGui::SameLine();
-			if(ImGui::Button("Activate all on next launch"))
-			{
-				for(auto& group : g_toggleGroups)
-				{
-					group.setIsActiveAtStartup(true);
-				}
-				saveShaderTogglerIniFile();
-			}
-			ImGui::SameLine();
-			if(ImGui::Button("Deactivate all on next launch"))
-			{
-				for(auto& group : g_toggleGroups)
-				{
-					group.setIsActiveAtStartup(false);
-				}
-				saveShaderTogglerIniFile();
-			}
+            ImGui::SameLine();
+            if(ImGui::Button("Activate all on next launch"))
+            {
+                for(auto& group : g_toggleGroups)
+                {
+                    group.setIsActiveAtStartup(true);
+                }
+                saveShaderTogglerIniFile();
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("Deactivate all on next launch"))
+            {
+                for(auto& group : g_toggleGroups)
+                {
+                    group.setIsActiveAtStartup(false);
+                }
+                saveShaderTogglerIniFile();
+            }
 
 			{
 				saveShaderTogglerIniFile();
@@ -804,55 +802,61 @@ ImGui::PopItemWidth();
 
 
 
-// ---- Added: AddonInit/AddonUninit with guard ----
+// ---- AddonInit/AddonUninit with idempotent guard ----
+static std::atomic_bool g_initialized{false};
+
 static bool DoAddonInit(HMODULE addon_module, HMODULE /*reshade_module*/)
 {
-\tif (g_initialized.exchange(true)) return true;
-\tif(!reshade::register_addon(addon_module))
-\t\treturn false;
+    if (g_initialized.exchange(true))
+        return true;
 
-\t// Determine INI path
-\tWCHAR buf[MAX_PATH];
-\tconst std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, MAX_PATH) ? std::filesystem::path(buf) : std::filesystem::path();
-\tconst std::filesystem::path basePath = dllPath.parent_path();
-\tg_iniFileName = (basePath / "ShaderToggler.ini").string();
+    if (!reshade::register_addon(addon_module))
+        return false;
 
-\t// Register overlay (events remain as in original file)
-\treshade::register_overlay(nullptr, &displaySettings);
+    // Determine INI path (next to the game EXE)
+    WCHAR buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    const std::filesystem::path dllPath = std::filesystem::path(buf);
+    const std::filesystem::path basePath = dllPath.parent_path();
+    g_iniFileName = (basePath / HASH_FILE_NAME).string();
 
-\tloadShaderTogglerIniFile();
-\treturn true;
+    // Hook settings overlay; other events are already registered elsewhere
+    reshade::register_overlay(nullptr, &displaySettings);
+
+    loadShaderTogglerIniFile();
+    return true;
 }
 
 static void DoAddonUninit(HMODULE addon_module, HMODULE /*reshade_module*/)
 {
-\tif (!g_initialized.exchange(false)) return;
-\tsaveShaderTogglerIniFile();
-\treshade::unregister_overlay(nullptr, &displaySettings);
-\treshade::unregister_addon(addon_module);
+    if (!g_initialized.exchange(false))
+        return;
+
+    saveShaderTogglerIniFile();
+    reshade::unregister_overlay(nullptr, &displaySettings);
+    reshade::unregister_addon(addon_module);
 }
 
 extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE reshade_module)
 {
-\treturn DoAddonInit(addon_module, reshade_module);
+    return DoAddonInit(addon_module, reshade_module);
 }
 
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module, HMODULE reshade_module)
 {
-\tDoAddonUninit(addon_module, reshade_module);
+    DoAddonUninit(addon_module, reshade_module);
 }
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 {
-	switch(fdwReason)
-	{
-	case DLL_PROCESS_ATTACH:
-		DoAddonInit(hModule, nullptr);
-		break;
-	case DLL_PROCESS_DETACH:
-		DoAddonUninit(hModule, nullptr);
-		break;
-	}
-	return TRUE;
+    switch (fdwReason)
+    {
+    case DLL_PROCESS_ATTACH:
+        DoAddonInit(hModule, nullptr);
+        break;
+    case DLL_PROCESS_DETACH:
+        DoAddonUninit(hModule, nullptr);
+        break;
+    }
+    return TRUE;
 }
 

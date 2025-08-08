@@ -1,4 +1,4 @@
-name: Build ShaderToggler (scan Release, x86 & x64)
+name: Build ShaderToggler (forced OutDir, x86 & x64)
 
 on:
   push:
@@ -28,75 +28,49 @@ jobs:
           echo "PROJ=$proj" >> $env:GITHUB_OUTPUT
           Write-Host "Using project: $proj"
 
-      - name: Build ${{ matrix.platform }} Release
-        run: >
-          msbuild "${{ steps.findproj.outputs.PROJ }}"
-          /p:Configuration=Release
-          /p:Platform=${{ matrix.platform }}
-          /m
-
-      # 🔎 Log what Release folders/files exist after the build
-      - name: List Release tree (diagnostic)
-        shell: pwsh
-        run: |
-          $root = Split-Path "${{ steps.findproj.outputs.PROJ }}"
-          Write-Host "Project root: $root"
-          $rels = Get-ChildItem -Path $root -Recurse -Directory -Filter Release
-          if (-not $rels) { Write-Host "No Release directories found."; exit 0 }
-          foreach ($d in $rels) {
-            Write-Host "=== $($d.FullName) ==="
-            Get-ChildItem -Path $d.FullName -Force
-          }
-
-      # 🧹 Robust packaging: find ANY dll in Release (prefer ones with 'ShaderToggler' in the name), per-platform
-      - name: Package .addon (scan Release dirs)
+      - name: Build ${{ matrix.platform }} Release (force OutDir)
         shell: pwsh
         run: |
           $plat = "${{ matrix.platform }}"
-          $root = Split-Path "${{ steps.findproj.outputs.PROJ }}"
+          $proj = "${{ steps.findproj.outputs.PROJ }}"
+          $out = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-          # Find Release dirs that look like correct platform
-          $releaseDirs = Get-ChildItem -Path $root -Recurse -Directory -Filter Release
-          if ($plat -eq 'x64') {
-            $releaseDirs = $releaseDirs | Where-Object { $_.FullName -match '\\x64\\' -or $_.FullName -match 'ShaderToggler\\x64\\Release' }
-          } else {
-            # Win32 might be 'Win32\\Release' or just 'Release' without 'x64'
-            $releaseDirs = $releaseDirs | Where-Object { $_.FullName -match '\\Win32\\' -or $_.FullName -notmatch '\\x64\\' }
-          }
+          Write-Host "Building to: $out"
+          msbuild $proj /p:Configuration=Release /p:Platform=$plat /p:OutDir="$out" /m /v:m
 
-          if (-not $releaseDirs) {
-            Write-Error "No Release folder matched platform '$plat'."
-            exit 1
-          }
+          Write-Host "Contents of $out after build:"
+          if (Test-Path $out) { Get-ChildItem -Recurse $out } else { Write-Host "OutDir missing?" }
 
-          # Gather DLLs under those Release dirs
-          $dlls = foreach ($d in $releaseDirs) { Get-ChildItem -Path $d.FullName -File -Filter *.dll -ErrorAction SilentlyContinue }
-          # Prefer ones that contain "ShaderToggler" in the name
-          $preferred = $dlls | Where-Object { $_.Name -match 'ShaderToggler' } | Sort-Object LastWriteTime -Descending
-          if (-not $preferred) { $preferred = $dlls | Sort-Object LastWriteTime -Descending }
+      - name: Package .addon
+        shell: pwsh
+        run: |
+          $plat = "${{ matrix.platform }}"
+          $out  = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
+          if (-not (Test-Path $out)) { Write-Error "Expected OutDir '$out' does not exist."; exit 1 }
 
-          if (-not $preferred) {
-            # Maybe the build already created an .addon
-            $addons = foreach ($d in $releaseDirs) { Get-ChildItem -Path $d.FullName -File -Filter *.addon -ErrorAction SilentlyContinue }
-            if ($addons) {
-              Write-Host "Found existing .addon(s):"
-              $addons | ForEach-Object { Write-Host $_.FullName }
+          # Pick the newest DLL in OutDir
+          $dll = Get-ChildItem -Path $out -Filter *.dll -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $dll) {
+            # Maybe the project already produced an .addon
+            $addon = Get-ChildItem -Path $out -Filter *.addon -File | Select-Object -First 1
+            if ($addon) {
+              Write-Host "Found existing .addon: $($addon.FullName)"
               exit 0
             }
-            Write-Error "No ShaderToggler.dll or .addon found after build."
+            Write-Error "No DLL found in $out. Did the build produce a DLL?"
             exit 1
           }
 
-          # Copy the newest DLL to .addon next to itself
-          $dll = $preferred | Select-Object -First 1
-          $addonPath = Join-Path $dll.DirectoryName "ShaderToggler.addon"
+          $addonPath = Join-Path $out "ShaderToggler.addon"
           Copy-Item $dll.FullName $addonPath -Force
-          Write-Host "Packaged: $addonPath"
+          Write-Host "Created: $addonPath"
+          Get-ChildItem $out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ShaderToggler-${{ matrix.platform }}-Release
           path: |
-            **/Release/*.dll
-            **/Release/*.addon
+            out/${{ matrix.platform }}/Release/*.dll
+            out/${{ matrix.platform }}/Release/*.addon

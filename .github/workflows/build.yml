@@ -14,24 +14,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # Find the .vcxproj automatically (prefer ShaderToggler.vcxproj)
       - name: Locate project
         id: findproj
         shell: pwsh
         run: |
           $cands = Get-ChildItem -Recurse -Filter *.vcxproj | Select-Object -Expand FullName
-          if (-not $cands) {
-            Write-Error "No .vcxproj found in repository."
-            exit 1
-          }
+          if (-not $cands) { Write-Error "No .vcxproj found"; exit 1 }
           $proj = $cands | Where-Object { $_ -like "*ShaderToggler.vcxproj" } | Select-Object -First 1
           if (-not $proj) { $proj = $cands | Select-Object -First 1 }
-          Write-Host "Using project: $proj"
           echo "PROJ=$proj" >> $env:GITHUB_OUTPUT
+          Write-Host "Using project: $proj"
 
       - name: Build ${{ matrix.platform }} Release
         run: >
@@ -39,24 +34,33 @@ jobs:
           /p:Configuration=Release
           /p:Platform=${{ matrix.platform }}
 
-      # Copy DLL -> .addon next to the DLL
-      - name: Package .addon
+      - name: Package .addon (auto-find output)
         shell: pwsh
         run: |
-          $cfg = "Release"
           $plat = "${{ matrix.platform }}"
-          # MSBuild default output dirs (commonly either ./x64/Release or ./Release)
-          $out1 = Join-Path (Split-Path "${{ steps.findproj.outputs.PROJ }}") "$plat\$cfg"
-          $out2 = Join-Path (Split-Path "${{ steps.findproj.outputs.PROJ }}") "$cfg"
-          $out = if (Test-Path $out1) { $out1 } elseif (Test-Path $out2) { $out2 } else { "" }
-          if (-not $out) {
-            Write-Host "Searching for ShaderToggler.dll under repo..."
-            $dll = Get-ChildItem -Recurse -Filter ShaderToggler.dll | Where-Object { $_.FullName -match "\\$plat\\$cfg\\|\\$cfg\\" } | Select-Object -First 1
-            if ($dll) { $out = Split-Path $dll.FullName }
+          # Look for common output layouts:
+          #  - ShaderToggler\<Platform>\Release\ShaderToggler.dll
+          #  - <Platform>\Release\ShaderToggler.dll
+          #  - Release\ShaderToggler.dll
+          $dll = Get-ChildItem -Recurse -Filter ShaderToggler.dll `
+            | Where-Object {
+                $_.FullName -match "\\$plat\\Release\\" -or
+                $_.FullName -match "ShaderToggler\\$plat\\Release\\" -or
+                (($plat -eq 'Win32') -and $_.FullName -match "\\Release\\")
+              } `
+            | Sort-Object FullName `
+            | Select-Object -First 1
+
+          if (-not $dll) {
+            Write-Host "Could not find ShaderToggler.dll automatically. Listing candidate folders:"
+            Get-ChildItem -Recurse -Directory -Filter Release | ForEach-Object { $_.FullName }
+            Write-Error "ShaderToggler.dll not found after build."
+            exit 1
           }
-          if (-not $out) { Write-Error "Could not locate output folder."; exit 1 }
-          Copy-Item "$out/ShaderToggler.dll" "$out/ShaderToggler.addon" -Force
-          Write-Host "Output dir: $out"
+
+          $out = Split-Path $dll.FullName
+          Copy-Item "$($dll.FullName)" (Join-Path $out "ShaderToggler.addon") -Force
+          Write-Host "Packaged .addon in: $out"
           Get-ChildItem $out
 
       - name: Upload artifact
@@ -64,6 +68,8 @@ jobs:
         with:
           name: ShaderToggler-${{ matrix.platform }}-Release
           path: |
+            **/ShaderToggler/*/Release/ShaderToggler.dll
+            **/ShaderToggler/*/Release/ShaderToggler.addon
             **/x64/Release/ShaderToggler.dll
             **/x64/Release/ShaderToggler.addon
             **/Win32/Release/ShaderToggler.dll

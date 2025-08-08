@@ -34,48 +34,57 @@ jobs:
           /p:Configuration=Release
           /p:Platform=${{ matrix.platform }}
 
-      - name: Package .addon (handle both output layouts)
+      - name: Package .addon (robust scan)
         shell: pwsh
         run: |
           $plat = "${{ matrix.platform }}"
           $root = Split-Path "${{ steps.findproj.outputs.PROJ }}"
 
-          # Candidate output dirs we saw in your logs
-          $cand = @(
-            Join-Path $root "ShaderToggler\$plat\Release"
-            Join-Path $root "$plat\Release"
-          )
+          # 1) Find DLLs
+          $dlls = Get-ChildItem -Path $root -Recurse -File -Filter ShaderToggler.dll
 
-          $found = $false
-          foreach ($dir in $cand) {
-            if (Test-Path $dir) {
-              Write-Host "Checking $dir"
-              $dll = Join-Path $dir "ShaderToggler.dll"
-              $addon = Join-Path $dir "ShaderToggler.addon"
-              if (Test-Path $dll) {
-                Copy-Item $dll $addon -Force
-                Write-Host "Created .addon next to DLL in $dir"
-                $found = $true
-              } elseif (Test-Path $addon) {
-                Write-Host "Found existing .addon in $dir"
-                $found = $true
-              }
-            }
+          # 2) Filter by platform:
+          if ($plat -eq 'x64') {
+            $dlls = $dlls | Where-Object { $_.FullName -match '\\x64\\' -or $_.DirectoryName -match '\\x64\\' }
+            # Fallback: if nothing under \x64\, allow anything under \Release\ but not \Win32\
+            if (-not $dlls) { $dlls = Get-ChildItem -Path $root -Recurse -File -Filter ShaderToggler.dll | Where-Object { $_.FullName -match '\\Release\\' -and $_.FullName -notmatch '\\Win32\\' } }
+          } else {
+            # Win32: prefer explicit \Win32\ paths
+            $dlls = $dlls | Where-Object { $_.FullName -match '\\Win32\\' }
+            # Fallback: many VS projects put Win32 straight under \Release\ with no \Win32\ segment
+            if (-not $dlls) { $dlls = Get-ChildItem -Path $root -Recurse -File -Filter ShaderToggler.dll | Where-Object { $_.FullName -match '\\Release\\' -and $_.FullName -notmatch '\\x64\\' } }
           }
 
-          if (-not $found) {
-            Write-Host "No DLL/ADDON found in candidate dirs. Listing contents:"
-            $cand | ForEach-Object { if (Test-Path $_) { Get-ChildItem -Recurse $_ | Select-Object FullName } }
-            Write-Error "ShaderToggler output not found. Did the build fail earlier?"
+          # 3) If no DLLs, try existing .addon files directly
+          if (-not $dlls) {
+            $addons = Get-ChildItem -Path $root -Recurse -File -Filter ShaderToggler.addon
+            if ($plat -eq 'x64') {
+              $addons = $addons | Where-Object { $_.FullName -match '\\x64\\' -or ($_.FullName -match '\\Release\\' -and $_.FullName -notmatch '\\Win32\\') }
+            } else {
+              $addons = $addons | Where-Object { $_.FullName -match '\\Win32\\' -or ($_.FullName -match '\\Release\\' -and $_.FullName -notmatch '\\x64\\') }
+            }
+            if ($addons) {
+              Write-Host "Found existing .addon(s):"
+              $addons | ForEach-Object { Write-Host $_.FullName }
+              exit 0
+            }
+            Write-Error "No ShaderToggler.dll or .addon found after build."
             exit 1
           }
+
+          # 4) Copy DLL -> .addon next to it
+          foreach ($dll in $dlls) {
+            $dir = Split-Path $dll.FullName
+            $addon = Join-Path $dir "ShaderToggler.addon"
+            Copy-Item $dll.FullName $addon -Force
+            Write-Host "Packaged: $addon"
+          }
+          Write-Host "Packaging complete."
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ShaderToggler-${{ matrix.platform }}-Release
           path: |
-            **/src/ShaderToggler/${{ matrix.platform }}/Release/ShaderToggler.dll
-            **/src/ShaderToggler/${{ matrix.platform }}/Release/ShaderToggler.addon
-            **/src/${{ matrix.platform }}/Release/ShaderToggler.dll
-            **/src/${{ matrix.platform }}/Release/ShaderToggler.addon
+            **/Release/ShaderToggler.dll
+            **/Release/ShaderToggler.addon

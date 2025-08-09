@@ -34,7 +34,7 @@ jobs:
           $out = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           msbuild $proj /t:Build /p:Configuration=Release /p:Platform=$plat /p:OutDir="$out" /m /v:m
-          Write-Host "Contents of $out:"
+          Write-Host "Contents of $out"
           Get-ChildItem -Recurse $out
 
       - name: Package .addon

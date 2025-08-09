@@ -1,9 +1,11 @@
-name: Build ShaderToggler Advanced 1.3.0
+name: Build & Package ShaderToggler
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
+  push:
+    paths:
+      - 'ShaderToggler-1.2.1_src/**'
+      - '.github/workflows/package.yml'
 
 jobs:
   build:
@@ -11,71 +13,73 @@ jobs:
     strategy:
       matrix:
         platform: [x64, Win32]
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Locate project
-        id: findproj
+      # Build to a known location so packaging is simple
+      - name: Build ${{ matrix.platform }} Release
         shell: pwsh
         run: |
-          $proj = Get-ChildItem -Recurse -Filter ShaderToggler.vcxproj | Select-Object -Expand FullName -First 1
-          if (-not $proj) { Write-Error "ShaderToggler.vcxproj not found"; exit 1 }
-          "PROJ=$proj" >> $env:GITHUB_OUTPUT
-          Write-Host "Using project: $proj"
-
-      - name: Build ${{ matrix.platform }} Release (force OutDir)
-        shell: pwsh
-        run: |
-          $plat = "${{ matrix.platform }}"
-          $proj = "${{ steps.findproj.outputs.PROJ }}"
-          $out = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
+          $proj = Get-ChildItem -Recurse -Filter ShaderToggler.vcxproj | Select-Object -First 1 -Expand FullName
+          if (-not $proj) { throw "ShaderToggler.vcxproj not found" }
+          $out = Join-Path (Get-Location) ("out\" + "${{ matrix.platform }}" + "\Release\")
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          msbuild $proj /t:Build /p:Configuration=Release /p:Platform=$plat /p:OutDir="$out" /m /v:m
-          Write-Host "Contents of $out"
-          Get-ChildItem -Recurse $out
+          msbuild $proj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:OutDir="$out" /m /v:m
+          Write-Host "Built to $out"
+          Get-ChildItem $out
 
-      - name: Package .addon
+      - name: Make .addon (from newest .dll)
         shell: pwsh
         run: |
-          $plat = "${{ matrix.platform }}"
-          $out = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
+          $out = Join-Path (Get-Location) ("out\" + "${{ matrix.platform }}" + "\Release\")
           $dll = Get-ChildItem -Path $out -Filter *.dll -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $dll) { Write-Error "No DLL found in $out"; exit 1 }
+          if (-not $dll) { throw "No DLL produced for ${{ matrix.platform }}" }
           Copy-Item $dll.FullName (Join-Path $out "ShaderToggler.addon") -Force
-          Write-Host "Packaged: $(Join-Path $out 'ShaderToggler.addon')"
+          Get-ChildItem $out
 
-      - name: Upload per-platform artifacts
+      - name: Upload per-platform artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShaderToggler-Advanced-1.3.0-${{ matrix.platform }}
+          name: build-${{ matrix.platform }}
           path: |
             out/${{ matrix.platform }}/Release/*.dll
             out/${{ matrix.platform }}/Release/*.addon
 
-  bundle:
-    runs-on: windows-latest
+  package:
+    runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - name: Download x64
+        uses: actions/download-artifact@v4
         with:
-          pattern: ShaderToggler-Advanced-1.3.0-*
-          merge-multiple: true
-      - name: Create release bundle
-        shell: pwsh
+          name: build-x64
+          path: pkg/x64
+
+      - name: Download Win32
+        uses: actions/download-artifact@v4
+        with:
+          name: build-Win32
+          path: pkg/Win32
+
+      - name: Add sources to package
         run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $x64 = Get-ChildItem -Recurse -Filter ShaderToggler.addon | Where-Object { $_.FullName -match "\\x64\\Release\\" } | Select-Object -First 1
-          $x86 = Get-ChildItem -Recurse -Filter ShaderToggler.addon | Where-Object { $_.FullName -match "\\Win32\\Release\\" } | Select-Object -First 1
-          if ($x64) { Copy-Item $x64.FullName (Join-Path "dist" "ShaderToggler.x64.addon") -Force }
-          if ($x86) { Copy-Item $x86.FullName (Join-Path "dist" "ShaderToggler.x86.addon") -Force }
-          Copy-Item README.md dist -Force
-          Copy-Item LICENSE dist -Force
-          Compress-Archive -Path dist\* -DestinationPath ShaderToggler-Advanced-1.3.0.zip -Force
-      - name: Upload final bundle
+          mkdir -p pkg/ShaderToggler-1.2.1_src
+          cp -R ShaderToggler-1.2.1_src/* pkg/ShaderToggler-1.2.1_src/ || true
+
+      - name: Make single ZIP
+        run: |
+          cd pkg
+          zip -r ../ShaderToggler-Package.zip .
+
+      - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShaderToggler-Advanced-1.3.0
-          path: ShaderToggler-Advanced-1.3.0.zip
+          name: ShaderToggler-Package
+          path: ShaderToggler-Package.zip

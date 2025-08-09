@@ -41,11 +41,57 @@
 #include "ToggleGroup.h"
 #include <vector>
 #include <filesystem>
+#include <atomic>
 
 using namespace reshade::api;
 using namespace ShaderToggler;
 
 extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";
+
+
+// === Group reordering overlay (drag & drop) ===
+static void move_group(size_t src, size_t dst)
+{
+    if (src == dst || src >= g_toggleGroups.size() || dst >= g_toggleGroups.size())
+        return;
+    auto tmp = g_toggleGroups[src];
+    g_toggleGroups.erase(g_toggleGroups.begin() + src);
+    if (src < dst) dst--;
+    g_toggleGroups.insert(g_toggleGroups.begin() + dst, std::move(tmp));
+    saveShaderTogglerIniFile();
+}
+
+static void draw_group_order_overlay(reshade::api::effect_runtime *)
+{
+    ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
+    ImGui::Separator();
+    ImGui::BeginChild("##grouporder", ImVec2(0, 0), true);
+
+    for (int i = 0; i < (int)g_toggleGroups.size(); ++i)
+    {
+        ImGui::PushID(i);
+        const std::string &name = g_toggleGroups[i].getName();
+        ImGui::Selectable((name + "  ââ").c_str(), false); // add arrows as hint
+
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
+        {
+            ImGui::SetDragDropPayload("ST_GROUP_INDEX", &i, sizeof(int));
+            ImGui::Text("Move: %s", name.c_str());
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ST_GROUP_INDEX"))
+            {
+                int src = *(const int*)payload->Data;
+                if (src != i) move_group((size_t)src, (size_t)i);
+            }
+            ImGui::EndDragDropTarget();
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+}
 extern "C" __declspec(dllexport) const char *DESCRIPTION = "Add-on which allows you to define groups of game shaders to toggle on/off with one key press.";
 
 struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataContainer {
@@ -728,17 +774,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				bool isDefaultActive = group.isActiveAtStartup();
-if (ImGui::Checkbox("Is active at startup", &isDefaultActive))
-{
-    group.setIsActiveAtStartup(isDefaultActive);
-    // Persist immediately so it survives restarts without needing the global Save button
-    saveShaderTogglerIniFile();
-}
-else
-{
-    // Still reflect the UI value in the in-memory group
-    group.setIsActiveAtStartup(isDefaultActive);
-}
+				ImGui::Checkbox("Is active at startup", &isDefaultActive);
+				group.setIsActiveAtStartup(isDefaultActive);
 				ImGui::PopItemWidth();
 
 				if(!isKeyEditing)
@@ -832,4 +869,93 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 	}
 
 	return TRUE;
+}
+
+
+// ---- AddonInit/AddonUninit with registrations ----
+static std::atomic_bool g_initialized{false};
+
+static bool DoAddonInit(HMODULE addon_module, HMODULE /*reshade_module*/)
+{
+    if (g_initialized.exchange(true))
+        return true;
+
+    if (!reshade::register_addon(addon_module))
+        return false;
+
+    // Determine INI path (next to the game EXE)
+    WCHAR buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    const std::filesystem::path dllPath = std::filesystem::path(buf);
+    const std::filesystem::path basePath = dllPath.parent_path();
+    g_iniFileName = (basePath / HASH_FILE_NAME).string();
+
+    // Ensure core callbacks are registered so hotkeys/toggling work
+    reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
+    reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+    reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
+    reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+    reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+    reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+    reshade::register_event<reshade::addon_event::draw>(onDraw);
+    reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+    reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+    reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+    reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
+
+    // Existing settings overlay + new Group Order overlay
+    reshade::register_overlay(nullptr, &displaySettings);
+    reshade::register_overlay("Group Order", &draw_group_order_overlay);
+
+    loadShaderTogglerIniFile();
+    return true;
+}
+
+static void DoAddonUninit(HMODULE addon_module, HMODULE /*reshade_module*/)
+{
+    if (!g_initialized.exchange(false))
+        return;
+
+    saveShaderTogglerIniFile();
+
+    reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
+    reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+    reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
+    reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+    reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+    reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+    reshade::unregister_event<reshade::addon_event::draw>(onDraw);
+    reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+    reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+    reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+    reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
+
+    reshade::unregister_overlay(nullptr, &displaySettings);
+    reshade::unregister_overlay("Group Order", &draw_group_order_overlay);
+    reshade::unregister_addon(addon_module);
+}
+
+extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE reshade_module)
+{
+    return DoAddonInit(addon_module, reshade_module);
+}
+
+extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module, HMODULE reshade_module)
+{
+    DoAddonUninit(addon_module, reshade_module);
+}
+
+// Keep a tiny DllMain that delegates
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
+{
+    switch (fdwReason)
+    {
+    case DLL_PROCESS_ATTACH:
+        DoAddonInit(hModule, nullptr);
+        break;
+    case DLL_PROCESS_DETACH:
+        DoAddonUninit(hModule, nullptr);
+        break;
+    }
+    return TRUE;
 }

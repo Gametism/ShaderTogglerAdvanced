@@ -1,13 +1,10 @@
-name: Build & Package ShaderToggler
+
+name: Build ShaderToggler (diagnose + sweep, x86 & x64)
 
 on:
-  workflow_dispatch: {}
   push:
-    branches: [ main ]
-    paths:
-      - 'ShaderToggler-1.2.1_src/**'
-      - '.github/workflows/build-and-package.yml'
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,135 +15,78 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Locate project & check platform support
-        id: probe
+      - name: Locate project
+        id: findproj
         shell: pwsh
         run: |
-          $proj = Get-ChildItem -Recurse -Filter ShaderToggler.vcxproj | Select-Object -First 1 -Expand FullName
-          if (-not $proj) { throw "ShaderToggler.vcxproj not found" }
+          $cands = Get-ChildItem -Recurse -Filter *.vcxproj | Select-Object -Expand FullName
+          if (-not $cands) { Write-Error "No .vcxproj found"; exit 1 }
+          $proj = $cands | Where-Object { $_ -like "*ShaderToggler.vcxproj" } | Select-Object -First 1
+          if (-not $proj) { $proj = $cands | Select-Object -First 1 }
           echo "PROJ=$proj" >> $env:GITHUB_OUTPUT
-
-          # Check if 'Release|<platform>' exists
-          $xml = [xml](Get-Content $proj)
-          $plat = "${{ matrix.platform }}"
-          $confNode = $xml.Project.ItemGroup.ProjectConfiguration | Where-Object { $_.Include -eq "Release|$plat" }
-          $supported = if ($confNode) { "true" } else { "false" }
-          echo "SUPPORTED=$supported" >> $env:GITHUB_OUTPUT
-          Write-Host "Platform $plat supported: $supported"
-
+          Write-Host "Using project: $proj"
       - name: Build ${{ matrix.platform }} Release (with binlog)
-        if: steps.probe.outputs.SUPPORTED == 'true'
         shell: pwsh
         run: |
-          $proj = "${{ steps.probe.outputs.PROJ }}"
           $plat = "${{ matrix.platform }}"
-          $out  = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          msbuild $proj /t:Build /p:Configuration=Release /p:Platform=$plat /p:OutDir="$out" /m /v:m /bl:"msbuild-$plat.binlog"
-          Write-Host "Build done to $out"
-          Get-ChildItem $out
-
-      - name: List Release trees
-        if: steps.probe.outputs.SUPPORTED == 'true'
+          $proj = "${{ steps.findproj.outputs.PROJ }}"
+          $binlog = "msbuild-${plat}.binlog"
+          msbuild $proj /t:Build /p:Configuration=Release /p:Platform=$plat /m /v:m /bl:$binlog
+          Write-Host "MSBuild finished for $plat. Binlog: $binlog"
+      - name: List Release directories (tree)
         shell: pwsh
         run: |
-          $projDir = Split-Path "${{ steps.probe.outputs.PROJ }}"
-          Write-Host "=== OutDir ==="
-          Get-ChildItem -Recurse -Force (Join-Path (Get-Location) ("out\" + "${{ matrix.platform }}" + "\Release\")) -ErrorAction SilentlyContinue
-          Write-Host "=== Any Release folders under project dir ==="
-          Get-ChildItem -Path $projDir -Recurse -Directory -Filter Release -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "--- $($_.FullName) ---"
-            Get-ChildItem -Force $_.FullName
+          $root = Split-Path "${{ steps.findproj.outputs.PROJ }}"
+          Write-Host "Project root: $root"
+          $rels = Get-ChildItem -Path $root -Recurse -Directory -Filter Release -ErrorAction SilentlyContinue
+          if (-not $rels) { Write-Host "No 'Release' directories found under project root."; exit 0 }
+          foreach ($d in $rels) {
+            Write-Host "=== $($d.FullName) ==="
+            Get-ChildItem -Force $d.FullName
           }
-
-      - name: Sweep for outputs (DLL/ADDON) and stage
-        if: steps.probe.outputs.SUPPORTED == 'true'
+      - name: Sweep up built DLLs/ADDONs to out folder
         shell: pwsh
         run: |
-          $plat    = "${{ matrix.platform }}"
-          $projDir = Split-Path "${{ steps.probe.outputs.PROJ }}"
-          $stage   = Join-Path (Get-Location) ("stage\" + $plat)
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-
-          # Prefer OutDir
+          $plat = "${{ matrix.platform }}"
+          $projDir = Split-Path "${{ steps.findproj.outputs.PROJ }}"
           $out = Join-Path (Get-Location) ("out\" + $plat + "\Release\")
-          $dlls   = @(Get-ChildItem -Path $out -Filter *.dll -File -ErrorAction SilentlyContinue)
-          $addons = @(Get-ChildItem -Path $out -Filter *.addon -File -ErrorAction SilentlyContinue)
-
-          # Fallback sweep under project dir if nothing in OutDir
-          if (-not $dlls -and -not $addons) {
-            $dlls   = @(Get-ChildItem -Path $projDir -Recurse -File -Filter *.dll -ErrorAction SilentlyContinue | Where-Object {
-              $_.FullName -match '\\Release\\' -and ($plat -eq 'x64' ? ($_.FullName -match '\\x64\\' -or $_.Directory.FullName -match '\\x64\\') : ($_.FullName -match '\\Win32\\' -or $_.Directory.FullName -match '\\Win32\\'))
-            })
-            $addons = @(Get-ChildItem -Path $projDir -Recurse -File -Filter *.addon -ErrorAction SilentlyContinue | Where-Object {
-              $_.FullName -match '\\Release\\' -and ($plat -eq 'x64' ? ($_.FullName -match '\\x64\\' -or $_.Directory.FullName -match '\\x64\\') : ($_.FullName -match '\\Win32\\' -or $_.Directory.FullName -match '\\Win32\\'))
-            })
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          # Find any DLL/ADDON under project dir Release folders
+          $dlls   = Get-ChildItem -Path $projDir -Recurse -File -Filter *.dll -ErrorAction SilentlyContinue
+          $addons = Get-ChildItem -Path $projDir -Recurse -File -Filter *.addon -ErrorAction SilentlyContinue
+          # Prefer platform-specific locations; otherwise take anything
+          if ($plat -eq 'x64') {
+            $dlls   = $dlls   | Where-Object { $_.FullName -match '\\x64\\' -or $_.Directory.FullName -match '\\x64\\' -or $_.FullName -match '\\Release\\' }
+            $addons = $addons | Where-Object { $_.FullName -match '\\x64\\' -or $_.Directory.FullName -match '\\x64\\' -or $_.FullName -match '\\Release\\' }
+          } else {
+            $dlls   = $dlls   | Where-Object { $_.FullName -match '\\Win32\\' -or $_.Directory.FullName -match '\\Win32\\' -or $_.FullName -match '\\Release\\' -and $_.FullName -notmatch '\\x64\\' }
+            $addons = $addons | Where-Object { $_.FullName -match '\\Win32\\' -or $_.Directory.FullName -match '\\Win32\\' -or $_.FullName -match '\\Release\\' -and $_.FullName -notmatch '\\x64\\' }
           }
-
           if ($dlls) {
-            $pick = ($dlls | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
-            Copy-Item $pick.FullName (Join-Path $stage "ShaderToggler.dll") -Force
-            Copy-Item (Join-Path $stage "ShaderToggler.dll") (Join-Path $stage "ShaderToggler.addon") -Force
+            # Prefer dll named like ShaderToggler, else take the newest
+            $pick = ($dlls | Where-Object { $_.Name -match 'ShaderToggler' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+            if (-not $pick) { $pick = $dlls | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
+            Copy-Item $pick.FullName (Join-Path $out "ShaderToggler.dll") -Force
+            Copy-Item (Join-Path $out "ShaderToggler.dll") (Join-Path $out "ShaderToggler.addon") -Force
+            Write-Host "Collected: $($pick.FullName) -> $out"
+          } elseif ($addons) {
+            $pick = ($addons | Where-Object { $_.Name -match 'ShaderToggler' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+            if (-not $pick) { $pick = $addons | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
+            Copy-Item $pick.FullName (Join-Path $out "ShaderToggler.addon") -Force
+            Write-Host "Collected existing addon: $($pick.FullName) -> $out"
+          } else {
+            Write-Host "No DLL/ADDON found. Uploading tree and binlog for diagnosis."
           }
-          if ($addons -and -not (Test-Path (Join-Path $stage "ShaderToggler.addon"))) {
-            $pick = ($addons | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
-            Copy-Item $pick.FullName (Join-Path $stage "ShaderToggler.addon") -Force
-          }
-
-          Write-Host "Staged files:"
-          Get-ChildItem -Force $stage
-
-      - name: Upload per-platform artifact (or logs if none)
+          Write-Host "Out dir contents:"
+          if (Test-Path $out) { Get-ChildItem $out } else { Write-Host "(none)" }
+      - name: Upload artifacts (outputs + logs)
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.platform }}
+          name: ShaderToggler-${{ matrix.platform }}-Release
           path: |
-            stage/${{ matrix.platform }}/**
-            msbuild-${{ matrix.platform }}.binlog
-
-      - name: Mark unsupported platform
-        if: steps.probe.outputs.SUPPORTED != 'true'
-        shell: pwsh
-        run: |
-          Write-Warning "Skipping ${{ matrix.platform }}: no 'Release|${{ matrix.platform }}' configuration in the project."
-
-  package:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download x64
-        uses: actions/download-artifact@v4
-        with:
-          name: build-x64
-          path: pkg/x64
-
-      - name: Try download Win32 (skip if missing)
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: build-Win32
-          path: pkg/Win32
-
-      - name: Add sources to package
-        run: |
-          mkdir -p pkg/ShaderToggler-1.2.1_src
-          cp -R ShaderToggler-1.2.1_src/* pkg/ShaderToggler-1.2.1_src/ || true
-
-      - name: Make single ZIP
-        run: |
-          cd pkg
-          zip -r ../ShaderToggler-Package.zip .
-
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShaderToggler-Package
-          path: ShaderToggler-Package.zip
+            out/${{ matrix.platform }}/Release/**
+            **/*.binlog
+            **/Release/**

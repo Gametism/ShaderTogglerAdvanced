@@ -77,7 +77,7 @@ BEGIN
     BEGIN
         BLOCK "040004b0"
         BEGIN
-            VALUE "CompanyName", "Frans 'Otis_Inf' Bouma & Sven 'Gametism' Königsmann"
+            VALUE "CompanyName", "Frans 'Otis_Inf' Bouma | Sven 'Gametism' Königsmann using AI"
             VALUE "FileDescription", "ShaderToggler Addon Advanced for ReShade 5+"
             VALUE "FileVersion", "1.2.1.0 M"
             VALUE "InternalName", "ShaderTo.dll"

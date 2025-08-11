@@ -810,8 +810,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
         reshade::register_event<reshade::addon_event::draw>([](reshade::api::command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t){ texmod::on_draw(cl); return false; });
         reshade::register_event<reshade::addon_event::init_device>([](reshade::api::device* d){ texmod::on_init_device(d); });
-        // [removed: push_descriptors registration not supported in this ReShade SDK]
-});
+        reshade::register_event<reshade::addon_event::push_descriptors>([](reshade::api::command_list* cl, reshade::api::shader_stage st, uint32_t pi, const // [patched] reshade::api::descriptor_range_update* u, uint32_t c){ texmod::on_push_descriptors(cl, st, pi, u, c); // removed });
         reshade::register_event<reshade::addon_event::destroy_device>([](reshade::api::device* d){ texmod::on_destroy_device(d); });
 			reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
 			reshade::register_event<reshade::addon_event::draw>(onDraw);

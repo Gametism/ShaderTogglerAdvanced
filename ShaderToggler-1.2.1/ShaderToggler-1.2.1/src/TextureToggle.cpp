@@ -142,17 +142,17 @@ void on_draw(api::command_list* cmd_list)
     apply_active_overrides(cmd_list);
 }
 
-void add_target_to_group(ShaderToggler::ToggleGroup& group, const TextureTarget& t)
+void add_target_to_group(ToggleGroup& group, const TextureTarget& t)
 {
     g_groupTargets[&group].push_back(t);
 }
 
-std::vector<TextureTarget>& get_targets(ShaderToggler::ToggleGroup& group)
+std::vector<TextureTarget>& get_targets(ToggleGroup& group)
 {
     return g_groupTargets[&group];
 }
 
-void draw_group_ui(ShaderToggler::ToggleGroup& group)
+void draw_group_ui(ToggleGroup& group)
 {
     if (ImGui::CollapsingHeader("Texture Hunt (experimental)"))
     {
@@ -228,7 +228,7 @@ void apply_active_overrides(api::command_list* cmd_list)
 }
 
 
-void save_group_textures(CDataFile& ini, int groupCounter, ShaderToggler::ToggleGroup& group)
+void save_group_textures(CDataFile& ini, int groupCounter, ToggleGroup& group)
 {
     auto &targets = g_groupTargets[&group];
     const std::string section = "Group" + std::to_string(groupCounter) + "_Textures";
@@ -241,7 +241,7 @@ void save_group_textures(CDataFile& ini, int groupCounter, ShaderToggler::Toggle
     }
 }
 
-void load_group_textures(CDataFile& ini, int groupCounter, ShaderToggler::ToggleGroup& group)
+void load_group_textures(CDataFile& ini, int groupCounter, ToggleGroup& group)
 {
     const std::string section = "Group" + std::to_string(groupCounter) + "_Textures";
     int count = ini.GetInt("TextureTargetsCount", section.c_str());

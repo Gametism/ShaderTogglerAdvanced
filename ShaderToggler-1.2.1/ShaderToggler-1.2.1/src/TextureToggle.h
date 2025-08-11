@@ -1,4 +1,4 @@
-#include "CDataFile.h"
+#include "ToggleGroup.h"
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – Texture toggling (experimental)
@@ -8,8 +8,6 @@
 /////////////////////////////////////////////////////////////////////////
 
 #pragma once
-
-namespace ShaderToggler { struct ToggleGroup; }
 #include <reshade.hpp>
 #include <vector>
 #include <unordered_map>
@@ -17,7 +15,6 @@ namespace ShaderToggler { struct ToggleGroup; }
 
 // Forward decls from existing codebase
 class CDataFile;
-
 namespace texmod {
 
 struct TextureTarget {
@@ -48,21 +45,21 @@ void on_destroy_device(reshade::api::device* device);
 void on_push_descriptors(reshade::api::command_list* cmd_list,
                          reshade::api::shader_stage stages,
                          uint32_t param_index,
-                         const /*descriptor_range_update_removed*/ int* updates,
+                         const /*compat_removed*/int* updates,
                          uint32_t update_count);
 
 void on_draw(reshade::api::command_list* cmd_list);
 // Called each draw to apply overrides for any active groups
 void apply_active_overrides(reshade::api::command_list* cmd_list);
 
-void draw_group_ui(struct ShaderToggler::ToggleGroup& group);
+void draw_group_ui(struct ToggleGroup& group);
 
-void add_target_to_group(struct ShaderToggler::ToggleGroup& group, const TextureTarget& t);
-std::vector<TextureTarget>& get_targets(struct ShaderToggler::ToggleGroup& group);
+void add_target_to_group(struct ToggleGroup& group, const TextureTarget& t);
+std::vector<TextureTarget>& get_targets(struct ToggleGroup& group);
 
 // Persistence into ShaderToggler.ini
-void save_group_textures(CDataFile& ini, int groupCounter, struct ShaderToggler::ToggleGroup& group);
-void load_group_textures(CDataFile& ini, int groupCounter, struct ShaderToggler::ToggleGroup& group);
+void save_group_textures(CDataFile& ini, int groupCounter, struct ToggleGroup& group);
+void load_group_textures(CDataFile& ini, int groupCounter, struct ToggleGroup& group);
 
 
 } // namespace texmod

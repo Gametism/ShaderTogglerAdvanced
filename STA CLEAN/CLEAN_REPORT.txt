@@ -1,0 +1,27 @@
+CLEAN REPORT
+============
+Source zip: /mnt/data/ShaderTogglerAdvanced_github_ready.zip
+Output zip: /mnt/data/ShaderTogglerAdvanced_clean_source.zip
+
+Removed binaries / build artifacts (0):
+(none)
+
+Scrubbed script lines (0):
+(none)
+
+Suspicious API name references (report-only; not removed) (15):
+- ShaderToggler-1.2.1/src/Include/imgui.h: connect
+- ShaderToggler-1.2.1/src/Include/imgui.h: connect
+- ShaderToggler-1.2.1/src/Include/imgui.h: connect
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress
+- ShaderToggler-1.2.1/src/Include/reshade.hpp: GetProcAddress

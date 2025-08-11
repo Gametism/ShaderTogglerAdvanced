@@ -1,5 +1,5 @@
-<?xml version='1.0' encoding='utf-8'?>
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -36,7 +36,7 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -49,7 +49,7 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -93,13 +93,13 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-    <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><BufferSecurityCheck>true</BufferSecurityCheck></ClCompile>
+    <AdditionalOptions>/Qspectre %(AdditionalOptions)</AdditionalOptions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat><LanguageStandard>stdcpp20</LanguageStandard></ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-    <ControlFlowGuard>Guard</ControlFlowGuard><AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions></Link>
-  </ItemDefinitionGroup>
+    <EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><ControlFlowGuard>Guard</ControlFlowGuard><DataExecutionPrevention>true</DataExecutionPrevention><RandomizedBaseAddress>true</RandomizedBaseAddress><AdditionalOptions>/Brepro /SAFESEH %(AdditionalOptions)</AdditionalOptions></Link>
+  <SpectreMitigation>Spectre</SpectreMitigation></ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -111,15 +111,15 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
-    <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><BufferSecurityCheck>true</BufferSecurityCheck></ClCompile>
+    <AdditionalOptions>/Qspectre %(AdditionalOptions)</AdditionalOptions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
       <OptimizeReferences>false</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-    <ControlFlowGuard>Guard</ControlFlowGuard><AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions></Link>
-  </ItemDefinitionGroup>
+    <ControlFlowGuard>Guard</ControlFlowGuard><DataExecutionPrevention>true</DataExecutionPrevention><RandomizedBaseAddress>true</RandomizedBaseAddress><AdditionalOptions>/Brepro /SAFESEH %(AdditionalOptions)</AdditionalOptions></Link>
+  <SpectreMitigation>Spectre</SpectreMitigation></ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -130,17 +130,17 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalIncludeDirectories>$(SolutionDir)Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
-    <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><BufferSecurityCheck>true</BufferSecurityCheck></ClCompile>
+    <AdditionalOptions>/Qspectre %(AdditionalOptions)</AdditionalOptions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-    <ControlFlowGuard>Guard</ControlFlowGuard><AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions></Link>
+    <EnableCOMDATFolding>false</EnableCOMDATFolding><OptimizeReferences>false</OptimizeReferences><ControlFlowGuard>Guard</ControlFlowGuard><DataExecutionPrevention>true</DataExecutionPrevention><RandomizedBaseAddress>true</RandomizedBaseAddress><AdditionalOptions>/Brepro /SAFESEH %(AdditionalOptions)</AdditionalOptions></Link>
     <PostBuildEvent>
       <Command>
       </Command>
     </PostBuildEvent>
-  </ItemDefinitionGroup>
+  <SpectreMitigation>Spectre</SpectreMitigation></ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -152,15 +152,15 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(SolutionDir)Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
-    <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><BufferSecurityCheck>true</BufferSecurityCheck></ClCompile>
+    <AdditionalOptions>/Qspectre %(AdditionalOptions)</AdditionalOptions><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
       <OptimizeReferences>false</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-    <ControlFlowGuard>Guard</ControlFlowGuard><AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions></Link>
-  </ItemDefinitionGroup>
+    <ControlFlowGuard>Guard</ControlFlowGuard><DataExecutionPrevention>true</DataExecutionPrevention><RandomizedBaseAddress>true</RandomizedBaseAddress><AdditionalOptions>/Brepro /SAFESEH %(AdditionalOptions)</AdditionalOptions></Link>
+  <SpectreMitigation>Spectre</SpectreMitigation></ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="CDataFile.h" />
     <ClInclude Include="crc32_hash.hpp" />

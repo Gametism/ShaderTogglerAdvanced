@@ -1,37 +1,32 @@
 ///////////////////////////////////////////////////////////////////////
 //
-// Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
-// which allows you to define groups of shaders to toggle them on/off 
-// with one key press.
-//
-// Based on the original ShaderToggler by Frans 'Otis_Inf' Bouma.
-// (c) Frans 'Otis_Inf' Bouma. All rights reserved.
-//
-// https://github.com/FransBouma/ShaderToggler
-//
-// Modifications (including active-at-startup - x86, group reordering, and UI changes)
-// (c) 2025 Sven 'Gametism' Königsmann. All rights reserved.
+// Part of ShaderToggler, a shader toggler add on for Reshade 5+ which allows you
+// to define groups of shaders to toggle them on/off with one key press
 // 
+// (c) Frans 'Otis_Inf' Bouma.
+//
+// All rights reserved.
+// https://github.com/FransBouma/ShaderToggler
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met :
 //
-//  * Redistributions of source code must retain the above copyright notices,
-//    this list of conditions, and the following disclaimer.
+//  * Redistributions of source code must retain the above copyright notice, this
+//	  list of conditions and the following disclaimer.
 //
-//  * Redistributions in binary form must reproduce the above copyright notices,
-//    this list of conditions, and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
+//  * Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and / or other materials provided with the distribution.
 //
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 // IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE
+// DISCLAIMED.IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
 // FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// DAMAGES(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
 // SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 // CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OR TORT(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
 
@@ -46,10 +41,7 @@
 #include "ToggleGroup.h"
 #include <vector>
 #include <filesystem>
-
-// Forward decl for immediate persistence on reorder
-void saveShaderTogglerIniFile();
-
+#include "TextureToggle.h"
 
 using namespace reshade::api;
 using namespace ShaderToggler;
@@ -135,7 +127,8 @@ void loadShaderTogglerIniFile()
 	}
 	for(auto& group: g_toggleGroups)
 	{
-		group.loadState(iniFile, groupCounter);		// groupCounter is normally 0 or greater. For when the old format is detected, it's -1 (and there's 1 group).
+		group.loadState(iniFile, groupCounter);		texmod::load_group_textures(iniFile, groupCounter, group);
+		// groupCounter is normally 0 or greater. For when the old format is detected, it's -1 (and there's 1 group).
 		groupCounter++;
 	}
 }
@@ -155,6 +148,7 @@ void saveShaderTogglerIniFile()
 	for(const auto& group: g_toggleGroups)
 	{
 		group.saveState(iniFile, groupCounter);
+		texmod::save_group_textures(iniFile, groupCounter, const_cast<ToggleGroup&>(group));
 		groupCounter++;
 	}
 	iniFile.SetFileName(g_iniFileName);
@@ -780,44 +774,11 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	}
 
 
-    // === Group Order (drag & drop) ===
-    if (ImGui::CollapsingHeader("Group Order", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader("Texture Toggling (Experimental)"))
     {
-        ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
-        ImGui::Separator();
-        ImGui::BeginChild("##grouporder_inline", ImVec2(0, 240), true);
-
-        for (int i = 0; i < (int)g_toggleGroups.size(); ++i)
-        {
-            ImGui::PushID(i);
-            const std::string &name = g_toggleGroups[i].getName();
-            ImGui::Selectable(name.c_str(), false);
-
-            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
-            {
-                ImGui::SetDragDropPayload("ST_GROUP_INDEX", &i, sizeof(int));
-                ImGui::Text("Move: %s", name.c_str());
-                ImGui::EndDragDropSource();
-            }
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ST_GROUP_INDEX"))
-                {
-                    int src = *(const int*)payload->Data;
-                    if (src != i)
-                    {
-                        auto tmp = g_toggleGroups[src];
-                        g_toggleGroups.erase(g_toggleGroups.begin() + src);
-                        if (src < i) i--;
-                        g_toggleGroups.insert(g_toggleGroups.begin() + i, std::move(tmp));
-                        saveShaderTogglerIniFile();
-                    }
-                }
-                ImGui::EndDragDropTarget();
-            }
-            ImGui::PopID();
-        }
-        ImGui::EndChild();
+        ImGui::TextWrapped("Start Texture Hunt, then navigate the UI/HUD you want to hide. "
+                           "Use Numpad 1/2 to browse observed SRV slots, Numpad 3 to mark the slot. "
+                           "Click 'Mark slot into group' to add it to the current group.");
     }
 }
 
@@ -847,6 +808,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 			reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 			reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
+        reshade::register_event<reshade::addon_event::draw>([](reshade::api::command_list* cl, uint32_t, uint32_t, uint32_t, uint32_t){ texmod::on_draw(cl); return false; });
+        reshade::register_event<reshade::addon_event::init_device>([](reshade::api::device* d){ texmod::on_init_device(d); });
+        reshade::register_event<reshade::addon_event::push_descriptors>([](reshade::api::command_list* cl, reshade::api::shader_stage st, uint32_t pi, const reshade::api::descriptor_range_update* u, uint32_t c){ texmod::on_push_descriptors(cl, st, pi, u, c); });
+        reshade::register_event<reshade::addon_event::destroy_device>([](reshade::api::device* d){ texmod::on_destroy_device(d); });
 			reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
 			reshade::register_event<reshade::addon_event::draw>(onDraw);
 			reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);

@@ -4,7 +4,6 @@
 
 struct ShaderStats {
     uint32_t draw_calls = 0;
-    float last_execution_time_ms = 0.0f;
 };
 
 class ShaderProfiler {

@@ -1,4 +1,3 @@
-#include "ShaderManager.h"
 #include "ShaderProfiler.h"
 #include <reshade.hpp>
 #include <imgui.h>
@@ -11,12 +10,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
     {
         reshade::register_event<reshade::addon_event::reshade_overlay>(
             [](reshade::api::effect_runtime *runtime) {
-                if (ImGui::Begin("Shader Stats Overlay")) {
-                    for (const auto &[pipeline, stats] : g_profiler.get_stats()) {
-                        ImGui::Text("Shader 0x%p - Draw Calls: %u", (void *)pipeline.handle, stats.draw_calls);
-                    }
-                    ImGui::End();
+                ImGui::Begin("Shader Stats Overlay");
+                for (const auto &[pipeline, stats] : g_profiler.get_stats()) {
+                    ImGui::Text("Shader 0x%p - Draw Calls: %u", (void *)pipeline.handle, stats.draw_calls);
                 }
+                ImGui::End();
             });
 
         reshade::register_event<reshade::addon_event::draw>(
@@ -26,8 +24,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
             });
 
         reshade::register_event<reshade::addon_event::present>(
-            [](reshade::api::command_queue *queue, reshade::api::swapchain *swapchain, const reshade::api::rect *source_rect, const reshade::api::rect *dest_rect, uint32_t dirty_rect_count, const reshade::api::rect *dirty_rects) {
-                g_profiler.new_frame(); // Reset stats at the start of each frame
+            [](reshade::api::command_queue *queue, reshade::api::swapchain *swapchain, const reshade::api::rect *src_rect, const reshade::api::rect *dst_rect, uint32_t dirty_count, const reshade::api::rect *dirty_rects) {
+                g_profiler.new_frame();
                 return false;
             });
     }

@@ -791,18 +791,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
         {
             ImGui::PushID(i);
             const std::string &name = g_toggleGroups[i].getName();
-        bool is_selected = (i == selected_shader_index);
-        if (is_selected) {
-            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.6f, 1.0f, 0.6f));
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.2f, 0.7f, 1.0f, 0.8f));
-            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.2f, 0.8f, 1.0f, 1.0f));
-        }
-        if (ImGui::Selectable(name.c_str(), is_selected)) {
-            selected_shader_index = i;
-        }
-        if (is_selected) {
-            ImGui::PopStyleColor(3);
-        }
+            ImGui::Selectable(name.c_str(), false);
 
             if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
             {

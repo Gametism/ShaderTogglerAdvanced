@@ -1,4 +1,3 @@
-#include "GamepadInput.h"
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+

@@ -1,4 +1,3 @@
-#include "GamepadInput.h"
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
@@ -307,20 +306,4 @@ namespace ShaderToggler
 		}
 		return _handleToShaderHash.at(handle);
 	}
-}
-
-
-void ShaderManager::Update()
-{
-    GamepadInput::Update();
-    if (GamepadInput::IsButtonPressed(SDL_CONTROLLER_BUTTON_A)) {
-        OutputDebugStringA("SDL Gamepad A pressed\n");
-        ToggleGroupByIndex(0);
-    }
-
-{
-    
-    } else {
-        OutputDebugStringA("Gamepad not connected\n");
-    }
 }

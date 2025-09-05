@@ -1,15 +1,15 @@
 #pragma once
-#include <windows.h>
-#include <XInput.h>
+#include <SDL.h>
+#include <SDL_gamecontroller.h>
 
-#pragma comment(lib, "XInput9_1_0.lib")
-
-class GamepadInput
-{
+class GamepadInput {
 public:
+    static void Initialize();
     static void Update();
-    static bool IsButtonPressed(WORD button);
+    static bool IsButtonPressed(SDL_GameControllerButton button);
+    static void Cleanup();
 
 private:
-    static XINPUT_STATE state;
+    static SDL_GameController* controller;
+    static Uint8 buttonStates[SDL_CONTROLLER_BUTTON_MAX];
 };

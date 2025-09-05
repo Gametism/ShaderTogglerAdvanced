@@ -309,16 +309,17 @@ namespace ShaderToggler
 	}
 }
 
+
 void ShaderManager::Update()
 {
     GamepadInput::Update();
-    DWORD result = XInputGetState(0, &GamepadInput::state);
-    if (result == ERROR_SUCCESS) {
-        OutputDebugStringA("Gamepad connected\n");
-        if (GamepadInput::IsButtonPressed(XINPUT_GAMEPAD_A)) {
-            OutputDebugStringA("Gamepad A pressed\n");
-            ToggleGroupByIndex(0);
-        }
+    if (GamepadInput::IsButtonPressed(SDL_CONTROLLER_BUTTON_A)) {
+        OutputDebugStringA("SDL Gamepad A pressed\n");
+        ToggleGroupByIndex(0);
+    }
+
+{
+    
     } else {
         OutputDebugStringA("Gamepad not connected\n");
     }

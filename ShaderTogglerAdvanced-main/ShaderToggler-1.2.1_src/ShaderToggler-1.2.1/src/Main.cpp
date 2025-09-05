@@ -38,6 +38,8 @@
 #define IMGUI_DISABLE_INCLUDE_IMCONFIG_H
 #define ImTextureID unsigned long long // Change ImGui texture ID type to that of a 'reshade::api::resource_view' handle
 
+
+#include "GamepadInput.h"
 #include <imgui.h>
 #include <reshade.hpp>
 #include "crc32_hash.hpp"
@@ -874,3 +876,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 
 	return TRUE;
 }
+
+
+    // Poll gamepad input
+    GamepadInput::Update();
+    if (GamepadInput::IsButtonPressed(XINPUT_GAMEPAD_A)) {
+        // Example: Trigger first toggle group when A is pressed
+        ShaderManager::GetInstance().ToggleGroupByIndex(0); // You may adjust index as needed
+    }

@@ -79,9 +79,9 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
-// Hold-to-cycle state for shader hunting (press & hold Numpad keys to scroll)
-static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
-static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
+// Hold-to-cycle state for Pixel shader hunting (NP1/NP2 only)
+static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2;
+static bool s_np1Held = false, s_np2Held = false;
 static int s_holdRepeatMs = 200; // repeat interval in milliseconds
 
 
@@ -455,107 +455,71 @@ static void onReshadePresent(effect_runtime* runtime)
 		}
 	}
 
-	
 	// hardcoded hunting keys.
 	// If Ctrl is pressed too, it'll step to the next marked shader (if any)
-	// Numpad 1: previous pixel shader (hold to scroll)
-	// Numpad 2: next pixel shader (hold to scroll)
+	// Numpad 1: previous pixel shader
+	// Numpad 2: next pixel shader
 	// Numpad 3: mark current pixel shader as part of the toggle group
-	// Numpad 4: previous vertex shader (hold to scroll)
-	// Numpad 5: next vertex shader (hold to scroll)
+	// Numpad 4: previous vertex shader
+	// Numpad 5: next vertex shader
 	// Numpad 6: mark current vertex shader as part of the toggle group
-	// Numpad 7: previous compute shader (hold to scroll)
-	// Numpad 8: next compute shader (hold to scroll)
+	// Numpad 7: previous compute shader
+	// Numpad 8: next compute shader
 	// Numpad 9: mark current compute shader as part of the toggle group
-
-	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
-	auto now = std::chrono::steady_clock::now();
-
-	// --- Pixel: prev (NP1) ---
-	if (runtime->is_key_down(VK_NUMPAD1))
+	
+	// Numpad 1: previous pixel shader  (tap = once, hold = repeat)
 	{
-		if (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)
+		const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
+		auto now = std::chrono::steady_clock::now();
+		if (runtime->is_key_pressed(VK_NUMPAD1) ||
+		    (runtime->is_key_down(VK_NUMPAD1) && (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)))
 		{
 			g_pixelShaderManager.huntPreviousShader(ctrlDown);
 			s_lastNP1 = now;
 			s_np1Held = true;
 		}
+		if (!runtime->is_key_down(VK_NUMPAD1)) s_np1Held = false;
 	}
-	else { s_np1Held = false; }
 
-	// --- Pixel: next (NP2) ---
-	if (runtime->is_key_down(VK_NUMPAD2))
+	
+	// Numpad 2: next pixel shader  (tap = once, hold = repeat)
 	{
-		if (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)
+		const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
+		auto now = std::chrono::steady_clock::now();
+		if (runtime->is_key_pressed(VK_NUMPAD2) ||
+		    (runtime->is_key_down(VK_NUMPAD2) && (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)))
 		{
 			g_pixelShaderManager.huntNextShader(ctrlDown);
 			s_lastNP2 = now;
 			s_np2Held = true;
 		}
+		if (!runtime->is_key_down(VK_NUMPAD2)) s_np2Held = false;
 	}
-	else { s_np2Held = false; }
 
-	// --- Pixel: mark (NP3) --- (single-press behavior)
 	if(runtime->is_key_pressed(VK_NUMPAD3))
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
-
-	// --- Vertex: prev (NP4) ---
-	if (runtime->is_key_down(VK_NUMPAD4))
+	if(runtime->is_key_pressed(VK_NUMPAD4))
 	{
-		if (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)
-		{
-			g_vertexShaderManager.huntPreviousShader(ctrlDown);
-			s_lastNP4 = now;
-			s_np4Held = true;
-		}
+		g_vertexShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
 	}
-	else { s_np4Held = false; }
-
-	// --- Vertex: next (NP5) ---
-	if (runtime->is_key_down(VK_NUMPAD5))
+	if(runtime->is_key_pressed(VK_NUMPAD5))
 	{
-		if (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)
-		{
-			g_vertexShaderManager.huntNextShader(ctrlDown);
-			s_lastNP5 = now;
-			s_np5Held = true;
-		}
+		g_vertexShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
 	}
-	else { s_np5Held = false; }
-
-	// --- Vertex: mark (NP6) --- (single-press behavior)
 	if(runtime->is_key_pressed(VK_NUMPAD6))
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
-
-	// --- Compute: prev (NP7) ---
-	if (runtime->is_key_down(VK_NUMPAD7))
+	if(runtime->is_key_pressed(VK_NUMPAD7))
 	{
-		if (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)
-		{
-			g_computeShaderManager.huntPreviousShader(ctrlDown);
-			s_lastNP7 = now;
-			s_np7Held = true;
-		}
+		g_computeShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
 	}
-	else { s_np7Held = false; }
-
-	// --- Compute: next (NP8) ---
-	if (runtime->is_key_down(VK_NUMPAD8))
+	if(runtime->is_key_pressed(VK_NUMPAD8))
 	{
-		if (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)
-		{
-			g_computeShaderManager.huntNextShader(ctrlDown);
-			s_lastNP8 = now;
-			s_np8Held = true;
-		}
+		g_computeShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
 	}
-	else { s_np8Held = false; }
-
-	// --- Compute: mark (NP9) --- (single-press behavior)
 	if(runtime->is_key_pressed(VK_NUMPAD9))
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();

@@ -310,6 +310,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		}
 		ImGui::End();
 	}
+
 	ImGui::PopStyleVar();
 }
 
@@ -482,7 +483,8 @@ static void onReshadePresent(effect_runtime* runtime)
 	// Supports NumLock ON (VK_NUMPADx) and OFF (VK_END/VK_DOWN/etc.).
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
 	auto now = std::chrono::steady_clock::now();
-	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(reshade::log_level::info, msg); };
+	// logging disabled
+
 
 	// Map numpad digits to nav keys when NumLock is off
 	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;
@@ -500,7 +502,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	    (is_key_down_numpad_or_nav(runtime, NP1, NAV1) && (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)))
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP1 = now; s_np1Held = true; log_step("HoldRepeat: Pixel Prev");
+		s_lastNP1 = now; s_np1Held = true;
 	}
 	if (!is_key_down_numpad_or_nav(runtime, NP1, NAV1)) s_np1Held = false;
 
@@ -509,7 +511,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	    (is_key_down_numpad_or_nav(runtime, NP2, NAV2) && (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)))
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
-		s_lastNP2 = now; s_np2Held = true; log_step("HoldRepeat: Pixel Next");
+		s_lastNP2 = now; s_np2Held = true;
 	}
 	if (!is_key_down_numpad_or_nav(runtime, NP2, NAV2)) s_np2Held = false;
 
@@ -524,7 +526,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	    (is_key_down_numpad_or_nav(runtime, NP4, NAV4) && (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)))
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP4 = now; s_np4Held = true; log_step("HoldRepeat: Vertex Prev");
+		s_lastNP4 = now; s_np4Held = true;
 	}
 	if (!is_key_down_numpad_or_nav(runtime, NP4, NAV4)) s_np4Held = false;
 
@@ -533,7 +535,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	    (is_key_down_numpad_or_nav(runtime, NP5, NAV5) && (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)))
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
-		s_lastNP5 = now; s_np5Held = true; log_step("HoldRepeat: Vertex Next");
+		s_lastNP5 = now; s_np5Held = true;
 	}
 	if (!is_key_down_numpad_or_nav(runtime, NP5, NAV5)) s_np5Held = false;
 
@@ -548,7 +550,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	    (is_key_down_numpad_or_nav(runtime, NP7, NAV7) && (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)))
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP7 = now; s_np7Held = true; log_step("HoldRepeat: Compute Prev");
+		s_lastNP7 = now; s_np7Held = true;
 	}
 	if (!is_key_down_numpad_or_nav(runtime, NP7, NAV7)) s_np7Held = false;
 
@@ -557,7 +559,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	    (is_key_down_numpad_or_nav(runtime, NP8, NAV8) && (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)))
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
-		s_lastNP8 = now; s_np8Held = true; log_step("HoldRepeat: Compute Next");
+		s_lastNP8 = now; s_np8Held = true;
 	}
 	if (!is_key_down_numpad_or_nav(runtime, NP8, NAV8)) s_np8Held = false;
 

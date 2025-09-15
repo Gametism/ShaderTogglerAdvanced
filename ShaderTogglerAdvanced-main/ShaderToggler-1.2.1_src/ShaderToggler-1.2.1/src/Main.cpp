@@ -79,7 +79,7 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
-// Hold-to-cycle state for Pixel/Vertex/Compute shader hunting (NP1/2,4/5,7/8)
+// Hold-to-cycle state for Numpad shader hunting
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 static int s_holdRepeatMs = 200; // repeat interval in milliseconds
@@ -457,15 +457,10 @@ static void onReshadePresent(effect_runtime* runtime)
 
 	
 	// hardcoded hunting keys with hold-to-repeat support.
-	// Ctrl modifies behavior: steps to next marked shader if any.
-	// Pixel shaders: NP1 (prev), NP2 (next), NP3 (mark)
-	// Vertex shaders: NP4 (prev), NP5 (next), NP6 (mark)
-	// Compute shaders: NP7 (prev), NP8 (next), NP9 (mark)
-
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
 	auto now = std::chrono::steady_clock::now();
 
-	// --- Pixel: prev (NP1) ---
+	// Pixel shaders
 	if (runtime->is_key_pressed(VK_NUMPAD1) ||
 	    (runtime->is_key_down(VK_NUMPAD1) && (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)))
 	{
@@ -475,7 +470,6 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	if (!runtime->is_key_down(VK_NUMPAD1)) s_np1Held = false;
 
-	// --- Pixel: next (NP2) ---
 	if (runtime->is_key_pressed(VK_NUMPAD2) ||
 	    (runtime->is_key_down(VK_NUMPAD2) && (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)))
 	{
@@ -485,13 +479,12 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	if (!runtime->is_key_down(VK_NUMPAD2)) s_np2Held = false;
 
-	// --- Pixel: mark (NP3) --- (single press only)
 	if(runtime->is_key_pressed(VK_NUMPAD3))
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
 
-	// --- Vertex: prev (NP4) ---
+	// Vertex shaders
 	if (runtime->is_key_pressed(VK_NUMPAD4) ||
 	    (runtime->is_key_down(VK_NUMPAD4) && (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)))
 	{
@@ -501,7 +494,6 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	if (!runtime->is_key_down(VK_NUMPAD4)) s_np4Held = false;
 
-	// --- Vertex: next (NP5) ---
 	if (runtime->is_key_pressed(VK_NUMPAD5) ||
 	    (runtime->is_key_down(VK_NUMPAD5) && (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)))
 	{
@@ -511,13 +503,12 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	if (!runtime->is_key_down(VK_NUMPAD5)) s_np5Held = false;
 
-	// --- Vertex: mark (NP6) --- (single press only)
 	if(runtime->is_key_pressed(VK_NUMPAD6))
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
 
-	// --- Compute: prev (NP7) ---
+	// Compute shaders
 	if (runtime->is_key_pressed(VK_NUMPAD7) ||
 	    (runtime->is_key_down(VK_NUMPAD7) && (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)))
 	{
@@ -527,7 +518,6 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	if (!runtime->is_key_down(VK_NUMPAD7)) s_np7Held = false;
 
-	// --- Compute: next (NP8) ---
 	if (runtime->is_key_pressed(VK_NUMPAD8) ||
 	    (runtime->is_key_down(VK_NUMPAD8) && (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)))
 	{
@@ -537,7 +527,6 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	if (!runtime->is_key_down(VK_NUMPAD8)) s_np8Held = false;
 
-	// --- Compute: mark (NP9) --- (single press only)
 	if(runtime->is_key_pressed(VK_NUMPAD9))
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();

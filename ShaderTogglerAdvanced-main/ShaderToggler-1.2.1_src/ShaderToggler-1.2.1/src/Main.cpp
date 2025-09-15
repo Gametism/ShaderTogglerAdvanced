@@ -85,7 +85,7 @@ static std::string g_iniFileName = "";
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 static int s_holdRepeatMs = 200;
-static bool s_holdDebug = true;
+static bool s_holdDebug = false;
 
 // Returns if either the numpad key OR its navigation-key equivalent (NumLock off) is DOWN
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
@@ -453,10 +453,6 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
-	// Proof that this build is loaded
-	static bool s_once = false;
-	if (!s_once) { reshade::log_message(reshade::log_level::info, "[ShaderToggler] HOLD PATCH ACTIVE"); s_once = true; }
-
 	if(g_activeCollectorFrameCounter>0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -482,7 +478,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	// Supports NumLock ON (VK_NUMPADx) and OFF (VK_END/VK_DOWN/etc.).
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
 	auto now = std::chrono::steady_clock::now();
-	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(reshade::log_level::info, msg); };
+	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(3, msg); };
 
 	// Map numpad digits to nav keys when NumLock is off
 	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;

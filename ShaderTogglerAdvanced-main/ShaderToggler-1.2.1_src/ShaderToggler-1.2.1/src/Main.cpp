@@ -42,20 +42,11 @@
 #include <reshade.hpp>
 #include "crc32_hash.hpp"
 #include "ShaderManager.h"
-
-// === Hold-to-cycle support ===
-#include <chrono>
-
-static std::chrono::steady_clock::time_point lastNextShaderTime, lastPrevShaderTime;
-static bool nextShaderHeld = false;
-static bool prevShaderHeld = false;
-static const int shaderRepeatDelay = 200; // ms between shader steps while held
-
-
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include <vector>
 #include <filesystem>
+#include <chrono>
 
 // Forward decl for immediate persistence on reorder
 void saveShaderTogglerIniFile();
@@ -87,6 +78,12 @@ static atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
+
+// Hold-to-cycle state for shader hunting (press & hold Numpad keys to scroll)
+static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
+static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
+static int s_holdRepeatMs = 200; // repeat interval in milliseconds
+
 
 /// <summary>
 /// Calculates a crc32 hash from the passed in shader bytecode. The hash is used to identity the shader in future runs.
@@ -458,49 +455,107 @@ static void onReshadePresent(effect_runtime* runtime)
 		}
 	}
 
+	
 	// hardcoded hunting keys.
 	// If Ctrl is pressed too, it'll step to the next marked shader (if any)
-	// Numpad 1: previous pixel shader
-	// Numpad 2: next pixel shader
+	// Numpad 1: previous pixel shader (hold to scroll)
+	// Numpad 2: next pixel shader (hold to scroll)
 	// Numpad 3: mark current pixel shader as part of the toggle group
-	// Numpad 4: previous vertex shader
-	// Numpad 5: next vertex shader
+	// Numpad 4: previous vertex shader (hold to scroll)
+	// Numpad 5: next vertex shader (hold to scroll)
 	// Numpad 6: mark current vertex shader as part of the toggle group
-	// Numpad 7: previous compute shader
-	// Numpad 8: next compute shader
+	// Numpad 7: previous compute shader (hold to scroll)
+	// Numpad 8: next compute shader (hold to scroll)
 	// Numpad 9: mark current compute shader as part of the toggle group
-	if(runtime->is_key_pressed(VK_NUMPAD1))
+
+	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
+	auto now = std::chrono::steady_clock::now();
+
+	// --- Pixel: prev (NP1) ---
+	if (runtime->is_key_down(VK_NUMPAD1))
 	{
-		g_pixelShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
+		if (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)
+		{
+			g_pixelShaderManager.huntPreviousShader(ctrlDown);
+			s_lastNP1 = now;
+			s_np1Held = true;
+		}
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD2))
+	else { s_np1Held = false; }
+
+	// --- Pixel: next (NP2) ---
+	if (runtime->is_key_down(VK_NUMPAD2))
 	{
-		g_pixelShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
+		if (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)
+		{
+			g_pixelShaderManager.huntNextShader(ctrlDown);
+			s_lastNP2 = now;
+			s_np2Held = true;
+		}
 	}
+	else { s_np2Held = false; }
+
+	// --- Pixel: mark (NP3) --- (single-press behavior)
 	if(runtime->is_key_pressed(VK_NUMPAD3))
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD4))
+
+	// --- Vertex: prev (NP4) ---
+	if (runtime->is_key_down(VK_NUMPAD4))
 	{
-		g_vertexShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
+		if (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)
+		{
+			g_vertexShaderManager.huntPreviousShader(ctrlDown);
+			s_lastNP4 = now;
+			s_np4Held = true;
+		}
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD5))
+	else { s_np4Held = false; }
+
+	// --- Vertex: next (NP5) ---
+	if (runtime->is_key_down(VK_NUMPAD5))
 	{
-		g_vertexShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
+		if (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)
+		{
+			g_vertexShaderManager.huntNextShader(ctrlDown);
+			s_lastNP5 = now;
+			s_np5Held = true;
+		}
 	}
+	else { s_np5Held = false; }
+
+	// --- Vertex: mark (NP6) --- (single-press behavior)
 	if(runtime->is_key_pressed(VK_NUMPAD6))
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD7))
+
+	// --- Compute: prev (NP7) ---
+	if (runtime->is_key_down(VK_NUMPAD7))
 	{
-		g_computeShaderManager.huntPreviousShader(runtime->is_key_down(VK_CONTROL));
+		if (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)
+		{
+			g_computeShaderManager.huntPreviousShader(ctrlDown);
+			s_lastNP7 = now;
+			s_np7Held = true;
+		}
 	}
-	if(runtime->is_key_pressed(VK_NUMPAD8))
+	else { s_np7Held = false; }
+
+	// --- Compute: next (NP8) ---
+	if (runtime->is_key_down(VK_NUMPAD8))
 	{
-		g_computeShaderManager.huntNextShader(runtime->is_key_down(VK_CONTROL));
+		if (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)
+		{
+			g_computeShaderManager.huntNextShader(ctrlDown);
+			s_lastNP8 = now;
+			s_np8Held = true;
+		}
 	}
+	else { s_np8Held = false; }
+
+	// --- Compute: mark (NP9) --- (single-press behavior)
 	if(runtime->is_key_pressed(VK_NUMPAD9))
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();
@@ -883,41 +938,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 	}
 
 	return TRUE;
-}
-
-
-// PATCHED: Hold-to-cycle shader keys
-
-
-// --- Next/Prev Shader cycling with hold-to-repeat ---
-// NOTE: Replace existing next/prev shader hotkey checks with this logic inside the update loop.
-
-if (GetAsyncKeyState(nextShaderKey) & 0x8000)
-{
-    auto now = std::chrono::steady_clock::now();
-    if (!nextShaderHeld || std::chrono::duration_cast<std::chrono::milliseconds>(now - lastNextShaderTime).count() > shaderRepeatDelay)
-    {
-        currentShader = (currentShader + 1) % shaderCount;
-        lastNextShaderTime = now;
-        nextShaderHeld = true;
-    }
-}
-else
-{
-    nextShaderHeld = false;
-}
-
-if (GetAsyncKeyState(prevShaderKey) & 0x8000)
-{
-    auto now = std::chrono::steady_clock::now();
-    if (!prevShaderHeld || std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPrevShaderTime).count() > shaderRepeatDelay)
-    {
-        currentShader = (currentShader - 1 + shaderCount) % shaderCount;
-        lastPrevShaderTime = now;
-        prevShaderHeld = true;
-    }
-}
-else
-{
-    prevShaderHeld = false;
 }

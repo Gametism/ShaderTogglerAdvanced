@@ -88,19 +88,26 @@ static int s_holdRepeatMs = 200;
 static bool s_holdDebug = false;
 
 // Returns if either the numpad key OR its navigation-key equivalent (NumLock off) is DOWN
-static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
+
+// Returns true ONLY if the Numpad key itself is down. Ignores navigation-key equivalents.
+static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int /*vk_nav*/)
 {
-	bool down = runtime->is_key_down(vk_numpad) || runtime->is_key_down(vk_nav);
-	// extra fallback using WinAPI
-	down = down || ((GetAsyncKeyState(vk_numpad) & 0x8000) != 0) || ((GetAsyncKeyState(vk_nav) & 0x8000) != 0);
-	return down;
+    bool down = runtime->is_key_down(vk_numpad);
+    #if defined(_WIN32)
+        down = down || ((GetAsyncKeyState(vk_numpad) & 0x8000) != 0);
+    #endif
+    return down;
 }
 
+
 // Returns if either the numpad key OR its navigation-key equivalent (NumLock off) was PRESSED
-static bool is_key_pressed_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
+
+// Returns true ONLY if the Numpad key itself was pressed. Ignores navigation-key equivalents.
+static bool is_key_pressed_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int /*vk_nav*/)
 {
-	return runtime->is_key_pressed(vk_numpad) || runtime->is_key_pressed(vk_nav);
+    return runtime->is_key_pressed(vk_numpad);
 }
+
 
 
 /// <summary>
@@ -266,9 +273,6 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 
 static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 {
-	ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_overlayOpacity);
-	ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
-
 	if(g_toggleGroupIdShaderEditing>=0)
 	{
 		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
@@ -310,8 +314,6 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		}
 		ImGui::End();
 	}
-
-	ImGui::PopStyleVar();
 }
 
 
@@ -694,7 +696,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	{
 		ImGui::AlignTextToFramePadding();
 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
+		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.2f, 1.0f);
 		ImGui::AlignTextToFramePadding();
 		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
 		ImGui::SameLine();

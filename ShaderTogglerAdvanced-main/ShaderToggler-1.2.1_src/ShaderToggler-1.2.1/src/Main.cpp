@@ -42,6 +42,16 @@
 #include <reshade.hpp>
 #include "crc32_hash.hpp"
 #include "ShaderManager.h"
+
+// === Hold-to-cycle support ===
+#include <chrono>
+
+static std::chrono::steady_clock::time_point lastNextShaderTime, lastPrevShaderTime;
+static bool nextShaderHeld = false;
+static bool prevShaderHeld = false;
+static const int shaderRepeatDelay = 200; // ms between shader steps while held
+
+
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include <vector>
@@ -873,4 +883,41 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 	}
 
 	return TRUE;
+}
+
+
+// PATCHED: Hold-to-cycle shader keys
+
+
+// --- Next/Prev Shader cycling with hold-to-repeat ---
+// NOTE: Replace existing next/prev shader hotkey checks with this logic inside the update loop.
+
+if (GetAsyncKeyState(nextShaderKey) & 0x8000)
+{
+    auto now = std::chrono::steady_clock::now();
+    if (!nextShaderHeld || std::chrono::duration_cast<std::chrono::milliseconds>(now - lastNextShaderTime).count() > shaderRepeatDelay)
+    {
+        currentShader = (currentShader + 1) % shaderCount;
+        lastNextShaderTime = now;
+        nextShaderHeld = true;
+    }
+}
+else
+{
+    nextShaderHeld = false;
+}
+
+if (GetAsyncKeyState(prevShaderKey) & 0x8000)
+{
+    auto now = std::chrono::steady_clock::now();
+    if (!prevShaderHeld || std::chrono::duration_cast<std::chrono::milliseconds>(now - lastPrevShaderTime).count() > shaderRepeatDelay)
+    {
+        currentShader = (currentShader - 1 + shaderCount) % shaderCount;
+        lastPrevShaderTime = now;
+        prevShaderHeld = true;
+    }
+}
+else
+{
+    prevShaderHeld = false;
 }

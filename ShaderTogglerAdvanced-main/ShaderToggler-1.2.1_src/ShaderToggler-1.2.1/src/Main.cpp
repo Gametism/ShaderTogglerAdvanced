@@ -77,8 +77,6 @@ static std::vector<ToggleGroup> g_toggleGroups;
 static atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
-
-static bool g_overlayTextOnly = true; // text only overlay (no bg), defaults to nearly invisible
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
@@ -268,16 +266,6 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 
 static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 {
-	// Apply overlay visibility: text-only removes background; alpha uses g_overlayOpacity down to 0.01
-	ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs;
-	if (g_overlayTextOnly) {
-		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_overlayOpacity); // text alpha
-		ImGui::SetNextWindowBgAlpha(0.0f); // no background
-	} else {
-		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
-		ImGui::SetNextWindowBgAlpha(g_overlayOpacity); // fade whole window
-	}
-
 	if(g_toggleGroupIdShaderEditing>=0)
 	{
 		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
@@ -319,8 +307,6 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		}
 		ImGui::End();
 	}
-
-	ImGui::PopStyleVar();
 }
 
 
@@ -467,16 +453,6 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
-	// One-time load for overlay text-only flag
-	static bool s_overlayLoadOnce = false;
-	if (!s_overlayLoadOnce) {
-		CDataFile iniFile;
-		iniFile.Load(g_iniFileName.c_str());
-		g_overlayTextOnly = iniFile.GetBool("OverlayTextOnly", "General");
-		if (g_overlayOpacity < 0.01f) g_overlayOpacity = 0.01f;
-		s_overlayLoadOnce = true;
-	}
-
 	if(g_activeCollectorFrameCounter>0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -502,7 +478,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	// Supports NumLock ON (VK_NUMPADx) and OFF (VK_END/VK_DOWN/etc.).
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
 	auto now = std::chrono::steady_clock::now();
-	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(reshade::log_level::info, msg); };
+	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(3, msg); };
 
 	// Map numpad digits to nav keys when NumLock is off
 	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;
@@ -712,8 +688,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	{
 		ImGui::AlignTextToFramePadding();
 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
-		ImGui::Checkbox("Overlay text-only (no background)", &g_overlayTextOnly);
+		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.2f, 1.0f);
 		ImGui::AlignTextToFramePadding();
 		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
 		ImGui::SameLine();

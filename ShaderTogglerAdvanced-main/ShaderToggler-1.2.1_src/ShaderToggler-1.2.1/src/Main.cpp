@@ -474,11 +474,10 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 
 	
-	// hardcoded hunting keys with robust hold-to-repeat.
-	// Supports NumLock ON (VK_NUMPADx) and OFF (VK_END/VK_DOWN/etc.).
+	
+	// hardcoded hunting keys with tap + hold (initial delay + repeat)
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
 	auto now = std::chrono::steady_clock::now();
-	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(3, msg); };
 
 	// Map numpad digits to nav keys when NumLock is off
 	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;
@@ -491,75 +490,60 @@ static void onReshadePresent(effect_runtime* runtime)
 	const int NP8 = VK_NUMPAD8, NAV8 = VK_UP;
 	const int NP9 = VK_NUMPAD9, NAV9 = VK_PRIOR;    // PageUp
 
+	auto step_or_prime = [&](bool pressed, bool down, std::chrono::steady_clock::time_point &last,
+	                         bool &primed, auto step_func)
+	{
+		if (pressed) {
+			step_func();
+			last = now; primed = false;
+			return;
+		}
+		if (down) {
+			const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count();
+			const int gate = primed ? s_holdRepeatMs : s_holdInitialDelayMs;
+			if (elapsed >= gate) {
+				step_func();
+				last = now; primed = true;
+			}
+		}
+	};
+
 	// --- Pixel prev (1) ---
-	if (is_key_pressed_numpad_or_nav(runtime, NP1, NAV1) ||
-	    (is_key_down_numpad_or_nav(runtime, NP1, NAV1) && (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)))
-	{
-		g_pixelShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP1 = now; s_np1Held = true; log_step("HoldRepeat: Pixel Prev");
-	}
-	if (!is_key_down_numpad_or_nav(runtime, NP1, NAV1)) s_np1Held = false;
-
+	step_or_prime(is_key_pressed_numpad_or_nav(runtime, NP1, NAV1),
+	              is_key_down_numpad_or_nav(runtime, NP1, NAV1),
+	              s_lastNP1, s_np1Primed, [&]{ g_pixelShaderManager.huntPreviousShader(ctrlDown); });
 	// --- Pixel next (2) ---
-	if (is_key_pressed_numpad_or_nav(runtime, NP2, NAV2) ||
-	    (is_key_down_numpad_or_nav(runtime, NP2, NAV2) && (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)))
-	{
-		g_pixelShaderManager.huntNextShader(ctrlDown);
-		s_lastNP2 = now; s_np2Held = true; log_step("HoldRepeat: Pixel Next");
-	}
-	if (!is_key_down_numpad_or_nav(runtime, NP2, NAV2)) s_np2Held = false;
-
-	// --- Pixel mark (3) --- (press only)
-	if (is_key_pressed_numpad_or_nav(runtime, NP3, NAV3))
-	{
+	step_or_prime(is_key_pressed_numpad_or_nav(runtime, NP2, NAV2),
+	              is_key_down_numpad_or_nav(runtime, NP2, NAV2),
+	              s_lastNP2, s_np2Primed, [&]{ g_pixelShaderManager.huntNextShader(ctrlDown); });
+	// --- Pixel mark (3) --- (single press only)
+	if (is_key_pressed_numpad_or_nav(runtime, NP3, NAV3)) {
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
 
 	// --- Vertex prev (4) ---
-	if (is_key_pressed_numpad_or_nav(runtime, NP4, NAV4) ||
-	    (is_key_down_numpad_or_nav(runtime, NP4, NAV4) && (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)))
-	{
-		g_vertexShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP4 = now; s_np4Held = true; log_step("HoldRepeat: Vertex Prev");
-	}
-	if (!is_key_down_numpad_or_nav(runtime, NP4, NAV4)) s_np4Held = false;
-
+	step_or_prime(is_key_pressed_numpad_or_nav(runtime, NP4, NAV4),
+	              is_key_down_numpad_or_nav(runtime, NP4, NAV4),
+	              s_lastNP4, s_np4Primed, [&]{ g_vertexShaderManager.huntPreviousShader(ctrlDown); });
 	// --- Vertex next (5) ---
-	if (is_key_pressed_numpad_or_nav(runtime, NP5, NAV5) ||
-	    (is_key_down_numpad_or_nav(runtime, NP5, NAV5) && (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)))
-	{
-		g_vertexShaderManager.huntNextShader(ctrlDown);
-		s_lastNP5 = now; s_np5Held = true; log_step("HoldRepeat: Vertex Next");
-	}
-	if (!is_key_down_numpad_or_nav(runtime, NP5, NAV5)) s_np5Held = false;
-
-	// --- Vertex mark (6) --- (press only)
-	if (is_key_pressed_numpad_or_nav(runtime, NP6, NAV6))
-	{
+	step_or_prime(is_key_pressed_numpad_or_nav(runtime, NP5, NAV5),
+	              is_key_down_numpad_or_nav(runtime, NP5, NAV5),
+	              s_lastNP5, s_np5Primed, [&]{ g_vertexShaderManager.huntNextShader(ctrlDown); });
+	// --- Vertex mark (6) --- (single press only)
+	if (is_key_pressed_numpad_or_nav(runtime, NP6, NAV6)) {
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
 
 	// --- Compute prev (7) ---
-	if (is_key_pressed_numpad_or_nav(runtime, NP7, NAV7) ||
-	    (is_key_down_numpad_or_nav(runtime, NP7, NAV7) && (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)))
-	{
-		g_computeShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP7 = now; s_np7Held = true; log_step("HoldRepeat: Compute Prev");
-	}
-	if (!is_key_down_numpad_or_nav(runtime, NP7, NAV7)) s_np7Held = false;
-
+	step_or_prime(is_key_pressed_numpad_or_nav(runtime, NP7, NAV7),
+	              is_key_down_numpad_or_nav(runtime, NP7, NAV7),
+	              s_lastNP7, s_np7Primed, [&]{ g_computeShaderManager.huntPreviousShader(ctrlDown); });
 	// --- Compute next (8) ---
-	if (is_key_pressed_numpad_or_nav(runtime, NP8, NAV8) ||
-	    (is_key_down_numpad_or_nav(runtime, NP8, NAV8) && (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)))
-	{
-		g_computeShaderManager.huntNextShader(ctrlDown);
-		s_lastNP8 = now; s_np8Held = true; log_step("HoldRepeat: Compute Next");
-	}
-	if (!is_key_down_numpad_or_nav(runtime, NP8, NAV8)) s_np8Held = false;
-
-	// --- Compute mark (9) --- (press only)
-	if (is_key_pressed_numpad_or_nav(runtime, NP9, NAV9))
-	{
+	step_or_prime(is_key_pressed_numpad_or_nav(runtime, NP8, NAV8),
+	              is_key_down_numpad_or_nav(runtime, NP8, NAV8),
+	              s_lastNP8, s_np8Primed, [&]{ g_computeShaderManager.huntNextShader(ctrlDown); });
+	// --- Compute mark (9) --- (single press only)
+	if (is_key_pressed_numpad_or_nav(runtime, NP9, NAV9)) {
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
 }

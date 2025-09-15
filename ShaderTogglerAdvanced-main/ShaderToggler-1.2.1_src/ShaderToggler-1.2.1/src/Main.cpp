@@ -266,6 +266,10 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 
 static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 {
+	// Apply overlay alpha to both text and background
+	ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_overlayOpacity);
+	ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
+
 	if(g_toggleGroupIdShaderEditing>=0)
 	{
 		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
@@ -307,6 +311,8 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		}
 		ImGui::End();
 	}
+
+	ImGui::PopStyleVar();
 }
 
 
@@ -478,7 +484,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	// Supports NumLock ON (VK_NUMPADx) and OFF (VK_END/VK_DOWN/etc.).
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
 	auto now = std::chrono::steady_clock::now();
-	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(3, msg); };
+	auto log_step = [&](const char* msg){ if (s_holdDebug) reshade::log_message(reshade::log_level::info, msg); };
 
 	// Map numpad digits to nav keys when NumLock is off
 	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;
@@ -688,7 +694,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	{
 		ImGui::AlignTextToFramePadding();
 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.2f, 1.0f);
+		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
 		ImGui::AlignTextToFramePadding();
 		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
 		ImGui::SameLine();

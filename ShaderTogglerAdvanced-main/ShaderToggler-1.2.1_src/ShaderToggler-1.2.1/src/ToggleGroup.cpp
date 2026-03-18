@@ -83,7 +83,7 @@ namespace ShaderToggler
 
 	ToggleGroup ToggleGroup::makeDuplicate() const
 	{
-		ToggleGroup copy(*this); // normal copy
+		ToggleGroup copy(*this);
 		copy.m_id = getNewGroupId();
 		copy.m_name += " Copy";
 		copy.m_active = false;
@@ -93,42 +93,141 @@ namespace ShaderToggler
 
 	void ToggleGroup::loadState(CDataFile& iniFile, int index)
 	{
-		std::stringstream ss;
-		ss << "Group" << index;
+		clearHashes();
 
-		m_name = iniFile.GetString("Name", ss.str());
-		m_activeAtStartup = iniFile.GetBool("ActiveAtStartup", ss.str());
+		// Legacy pre-1.0 format support: only PixelShaders / VertexShaders / ComputeShaders sections
+		if (index < 0)
+		{
+			int amount = iniFile.GetInt("AmountHashes", "PixelShaders");
+			for (int i = 0; i < amount; i++)
+			{
+				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "PixelShaders");
+				if (hash != UINT_MAX)
+				{
+					m_pixelShaderHashes.insert(hash);
+				}
+			}
 
-		uint32_t key = iniFile.GetUInt("ToggleKey", ss.str());
-		m_toggleKey = KeyData::fromInt(key);
+			amount = iniFile.GetInt("AmountHashes", "VertexShaders");
+			for (int i = 0; i < amount; i++)
+			{
+				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "VertexShaders");
+				if (hash != UINT_MAX)
+				{
+					m_vertexShaderHashes.insert(hash);
+				}
+			}
 
-		m_pixelShaderHashes.clear();
-		m_vertexShaderHashes.clear();
-		m_computeShaderHashes.clear();
+			amount = iniFile.GetInt("AmountHashes", "ComputeShaders");
+			for (int i = 0; i < amount; i++)
+			{
+				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "ComputeShaders");
+				if (hash != UINT_MAX)
+				{
+					m_computeShaderHashes.insert(hash);
+				}
+			}
 
-		for (auto v : iniFile.GetArray("PixelShaderHashes", ss.str()))
-			m_pixelShaderHashes.insert(v);
-		for (auto v : iniFile.GetArray("VertexShaderHashes", ss.str()))
-			m_vertexShaderHashes.insert(v);
-		for (auto v : iniFile.GetArray("ComputeShaderHashes", ss.str()))
-			m_computeShaderHashes.insert(v);
+			// Legacy format had no group name / startup flag / key per group
+			m_name = "Default";
+			m_activeAtStartup = false;
+			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
+			return;
+		}
+
+		// Original group-based format:
+		// [Group0]
+		// [Group0_PixelShaders]
+		// [Group0_VertexShaders]
+		// [Group0_ComputeShaders]
+		const std::string sectionRoot = "Group" + std::to_string(index);
+		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
+		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
+		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
+
+		int amountShaders = iniFile.GetInt("AmountHashes", vertexHashesCategory);
+		for (int i = 0; i < amountShaders; i++)
+		{
+			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), vertexHashesCategory);
+			if (hash != UINT_MAX)
+			{
+				m_vertexShaderHashes.insert(hash);
+			}
+		}
+
+		amountShaders = iniFile.GetInt("AmountHashes", pixelHashesCategory);
+		for (int i = 0; i < amountShaders; i++)
+		{
+			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), pixelHashesCategory);
+			if (hash != UINT_MAX)
+			{
+				m_pixelShaderHashes.insert(hash);
+			}
+		}
+
+		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
+		for (int i = 0; i < amountShaders; i++)
+		{
+			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
+			if (hash != UINT_MAX)
+			{
+				m_computeShaderHashes.insert(hash);
+			}
+		}
+
+		m_name = iniFile.GetValue("Name", sectionRoot);
+		if (m_name.empty())
+		{
+			m_name = "Default";
+		}
+
+		const uint32_t toggleKeyValue = iniFile.GetUInt("ToggleKey", sectionRoot);
+		if (toggleKeyValue == UINT_MAX)
+		{
+			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
+		}
+		else
+		{
+			m_toggleKey = KeyData::fromInt(toggleKeyValue);
+		}
+
+		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
+		m_active = m_activeAtStartup;
 	}
 
 	void ToggleGroup::saveState(CDataFile& iniFile, int index) const
 	{
-		std::stringstream ss;
-		ss << "Group" << index;
+		const std::string sectionRoot = "Group" + std::to_string(index);
+		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
+		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
+		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
 
-		iniFile.SetString("Name", m_name, "", ss.str());
-		iniFile.SetBool("ActiveAtStartup", m_activeAtStartup, "", ss.str());
-		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", ss.str());
+		int counter = 0;
+		for (const auto hash : m_vertexShaderHashes)
+		{
+			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", vertexHashesCategory);
+			counter++;
+		}
+		iniFile.SetUInt("AmountHashes", counter, "", vertexHashesCategory);
 
-		std::vector<uint32_t> pixel(m_pixelShaderHashes.begin(), m_pixelShaderHashes.end());
-		std::vector<uint32_t> vertex(m_vertexShaderHashes.begin(), m_vertexShaderHashes.end());
-		std::vector<uint32_t> compute(m_computeShaderHashes.begin(), m_computeShaderHashes.end());
+		counter = 0;
+		for (const auto hash : m_pixelShaderHashes)
+		{
+			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", pixelHashesCategory);
+			counter++;
+		}
+		iniFile.SetUInt("AmountHashes", counter, "", pixelHashesCategory);
 
-		iniFile.SetArray("PixelShaderHashes", pixel, "", ss.str());
-		iniFile.SetArray("VertexShaderHashes", vertex, "", ss.str());
-		iniFile.SetArray("ComputeShaderHashes", compute, "", ss.str());
+		counter = 0;
+		for (const auto hash : m_computeShaderHashes)
+		{
+			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", computeHashesCategory);
+			counter++;
+		}
+		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
+
+		iniFile.SetValue("Name", m_name, "", sectionRoot);
+		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
+		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 	}
 }

@@ -31,6 +31,9 @@
 #include <algorithm>
 #include <atomic>
 #include <string>
+#include <fstream>
+#include <cstring>
+#include <cstdio>
 
 #ifdef min
 #undef min
@@ -74,6 +77,20 @@ static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 static int s_holdRepeatMs = 200;
 
+// Watermark / hidden signature
+static const char* GT_CREATOR = "Gametism";
+static const char* GT_CACHE_KEY = "CacheStamp";
+static const char* GT_HEADER =
+	"; ==========================================\n"
+	"; ShaderToggler Advanced Configuration\n"
+	"; Created by Gametism\n"
+	"; ==========================================\n\n";
+
+static const char* GT_FOOTER =
+	"\n; ==========================================\n"
+	"; End of file – Gametism\n"
+	"; ==========================================\n";
+
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
 	bool down = runtime->is_key_down(vk_numpad) || runtime->is_key_down(vk_nav);
@@ -84,6 +101,94 @@ static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int
 static bool is_key_pressed_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
 	return runtime->is_key_pressed(vk_numpad) || runtime->is_key_pressed(vk_nav);
+}
+
+static uint64_t fnv1a64(const std::string& text)
+{
+	uint64_t hash = 14695981039346656037ull;
+	for (unsigned char c : text)
+	{
+		hash ^= static_cast<uint64_t>(c);
+		hash *= 1099511628211ull;
+	}
+	return hash;
+}
+
+static std::string toHex64(uint64_t value)
+{
+	char buf[17] = {};
+	snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(value));
+	return std::string(buf);
+}
+
+static std::string buildIniSignature()
+{
+	std::string data;
+	data += "Creator=";
+	data += GT_CREATOR;
+	data += ";AmountGroups=";
+	data += std::to_string(g_toggleGroups.size());
+
+	for (const auto& group : g_toggleGroups)
+	{
+		data += "|Name=" + group.getName();
+		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
+		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
+
+		for (auto v : group.getPixelShaderHashes())
+			data += "|P=" + std::to_string(v);
+		for (auto v : group.getVertexShaderHashes())
+			data += "|V=" + std::to_string(v);
+		for (auto v : group.getComputeShaderHashes())
+			data += "|C=" + std::to_string(v);
+	}
+
+	return toHex64(fnv1a64(data));
+}
+
+static bool fileContainsTopAndBottomWatermark(const std::string& filename)
+{
+	std::ifstream inFile(filename, std::ios::binary);
+	if (!inFile.is_open())
+		return false;
+
+	std::string content((std::istreambuf_iterator<char>(inFile)),
+	                    std::istreambuf_iterator<char>());
+	inFile.close();
+
+	const bool hasHeader = content.rfind(GT_HEADER, 0) == 0;
+	const bool hasFooter = content.find(GT_FOOTER) != std::string::npos;
+
+	return hasHeader && hasFooter;
+}
+
+static void rewriteIniWithTopAndBottomWatermark(const std::string& filename)
+{
+	std::ifstream inFile(filename, std::ios::binary);
+	if (!inFile.is_open())
+		return;
+
+	std::string content((std::istreambuf_iterator<char>(inFile)),
+	                    std::istreambuf_iterator<char>());
+	inFile.close();
+
+	if (content.rfind(GT_HEADER, 0) == 0)
+	{
+		content.erase(0, std::strlen(GT_HEADER));
+	}
+
+	size_t footerPos = content.find(GT_FOOTER);
+	if (footerPos != std::string::npos)
+	{
+		content.erase(footerPos, std::strlen(GT_FOOTER));
+	}
+
+	std::ofstream outFile(filename, std::ios::binary | std::ios::trunc);
+	if (!outFile.is_open())
+		return;
+
+	outFile << GT_HEADER << content << GT_FOOTER;
+	outFile.close();
 }
 
 static uint32_t calculateShaderHash(void* shaderData)
@@ -113,24 +218,51 @@ void loadShaderTogglerIniFile()
 	}
 
 	const int numberOfGroups = iniFile.GetInt("AmountGroups", "General");
+
+	// Legacy/old format fallback
 	if (numberOfGroups == INT_MIN)
 	{
 		addDefaultGroup();
 		g_toggleGroups[0].loadState(iniFile, -1);
+		saveShaderTogglerIniFile();
 		return;
 	}
 
+	g_toggleGroups.clear();
 	for (int i = 0; i < numberOfGroups; i++)
 	{
 		g_toggleGroups.push_back(ToggleGroup("", ToggleGroup::getNewGroupId()));
 		g_toggleGroups.back().loadState(iniFile, i);
+	}
+
+	const std::string creator = iniFile.GetValue("Creator", "General");
+	const std::string savedStamp = iniFile.GetValue(GT_CACHE_KEY, "General");
+	const std::string currentStamp = buildIniSignature();
+
+	bool needsRepair = false;
+
+	if (creator != GT_CREATOR)
+		needsRepair = true;
+
+	if (savedStamp != currentStamp)
+		needsRepair = true;
+
+	if (!fileContainsTopAndBottomWatermark(g_iniFileName))
+		needsRepair = true;
+
+	if (needsRepair)
+	{
+		saveShaderTogglerIniFile();
 	}
 }
 
 void saveShaderTogglerIniFile()
 {
 	CDataFile iniFile;
+
 	iniFile.SetInt("AmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
+	iniFile.SetValue("Creator", GT_CREATOR, "", "General");
+	iniFile.SetValue(GT_CACHE_KEY, buildIniSignature(), "", "General");
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
@@ -139,6 +271,8 @@ void saveShaderTogglerIniFile()
 
 	iniFile.SetFileName(g_iniFileName);
 	iniFile.Save();
+
+	rewriteIniWithTopAndBottomWatermark(g_iniFileName);
 }
 
 static void onInitCommandList(command_list *commandList)

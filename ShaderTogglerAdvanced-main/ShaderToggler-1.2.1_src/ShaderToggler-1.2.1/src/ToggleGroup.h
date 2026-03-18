@@ -35,74 +35,64 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
 #pragma once
-
 #include <string>
-#include <unordered_set>
-
-#include "CDataFile.h"
+#include <vector>
+#include <reshade.hpp>
+#include "ShaderManager.h"
 #include "KeyData.h"
 
-namespace ShaderToggler
-{
-	class ToggleGroup
-	{
-	public:
-		ToggleGroup(std::string name, int Id);
+namespace ShaderToggler {
 
-		static int getNewGroupId();
+class ToggleGroup {
+public:
+    using GroupId = int;
 
-		void setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired);
-		void setToggleKey(KeyData newData);
-		void setName(std::string newName);
-		/// <summary>
-		/// Writes the shader hashes, name and toggle key to the ini file specified, using a Group + groupCounter section.
-		/// </summary>
-		/// <param name="iniFile"></param>
-		/// <param name="groupCounter"></param>
-		void saveState(CDataFile& iniFile, int groupCounter) const;
-		/// <summary>
-		/// Loads the shader hashes, name and toggle key from the ini file specified, using a Group + groupCounter section.
-		/// </summary>
-		/// <param name="iniFile"></param>
-		/// <param name="groupCounter">if -1, the ini file is in the pre-1.0 format</param>
-		void loadState(CDataFile& iniFile, int groupCounter);
-		void storeCollectedHashes(const std::unordered_set<uint32_t> pixelShaderHashes, const std::unordered_set<uint32_t> vertexShaderHashes, const std::unordered_set<uint32_t> computeShaderHashes);
-		bool isBlockedPixelShader(uint32_t shaderHash);
-		bool isBlockedVertexShader(uint32_t shaderHash);
-		bool isBlockedComputeShader(uint32_t shaderHash);
-		void clearHashes();
+    ToggleGroup(const std::string& name, GroupId id);
 
-		void toggleActive() { _isActive = !_isActive;}
-		void setIsActiveAtStartup(bool newValue) { _isActiveAtStartup = newValue; }
-		void setEditing(bool isEditing) { _isEditing = isEditing;}
+    // Duplication-safe copy constructor
+    ToggleGroup(const ToggleGroup& other);
 
-		std::string getToggleKeyAsString() { return _keyData.getKeyAsString();}
-		uint8_t getToggleKey() { return _keyData.getKeyCode();}
-		std::string getName() { return _name;}
-		bool isActiveAtStartup() { return _isActiveAtStartup; }
-		bool isActive() { return _isActive;}
-		bool isEditing() { return _isEditing;}
-		bool isEmpty() const { return _vertexShaderHashes.size() <= 0 && _pixelShaderHashes.size() <= 0 && _computeShaderHashes.size() <= 0; }
-		int getId() const { return _id; }
-		std::unordered_set<uint32_t> getPixelShaderHashes() const { return _pixelShaderHashes;}
-		std::unordered_set<uint32_t> getVertexShaderHashes() const { return _vertexShaderHashes;}
-		std::unordered_set<uint32_t> getComputeShaderHashes() const { return _computeShaderHashes; }
-		bool isToggleKeyPressed(const reshade::api::effect_runtime* runtime) { return _keyData.isKeyPressed(runtime);}
-		
-		bool operator==(const ToggleGroup& rhs)
-		{
-		    return getId() == rhs.getId();
-		}
+    GroupId getId() const;
+    void setId(GroupId id);
 
-	private:
-		int _id;
-		std::string	_name;
-		KeyData _keyData;
-		std::unordered_set<uint32_t> _vertexShaderHashes;
-		std::unordered_set<uint32_t> _pixelShaderHashes;
-		std::unordered_set<uint32_t> _computeShaderHashes;
-		bool _isActive;				// true means the group is actively toggled (so the hashes have to be hidden).
-		bool _isEditing;			// true means the group is actively edited (name, key)
-		bool _isActiveAtStartup;	// true means the group is active when the host game is started and the toggler has loaded the groups.
-	};
-}
+    const std::string& getName() const;
+    void setName(const std::string& name);
+
+    bool isActive() const;
+    void setActive(bool active);
+
+    bool isActiveAtStartup() const;
+    void setIsActiveAtStartup(bool startup);
+
+    bool isEditing() const;
+    void setEditing(bool editing);
+
+    void setToggleKey(const KeyData& key);
+    const KeyData& getToggleKey() const;
+    std::string getToggleKeyAsString() const;
+
+    void clearHashes();
+    void storeCollectedHashes(const std::vector<uint32_t>& pixel, const std::vector<uint32_t>& vertex, const std::vector<uint32_t>& compute);
+    const std::vector<uint32_t>& getPixelShaderHashes() const;
+    const std::vector<uint32_t>& getVertexShaderHashes() const;
+    const std::vector<uint32_t>& getComputeShaderHashes() const;
+
+    void loadState(class CDataFile& iniFile, int index);
+    void saveState(class CDataFile& iniFile, int index) const;
+
+    static GroupId getNewGroupId();
+
+private:
+    GroupId m_id;
+    std::string m_name;
+    bool m_active;
+    bool m_activeAtStartup;
+    bool m_editing;
+    KeyData m_toggleKey;
+
+    std::vector<uint32_t> m_pixelShaderHashes;
+    std::vector<uint32_t> m_vertexShaderHashes;
+    std::vector<uint32_t> m_computeShaderHashes;
+};
+
+} // namespace ShaderToggler

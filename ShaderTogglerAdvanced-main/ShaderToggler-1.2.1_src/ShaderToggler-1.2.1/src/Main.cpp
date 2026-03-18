@@ -774,7 +774,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
 		ImGui::Separator();
 
-		float childHeight = std::min(600.0f, 45.0f * static_cast<float>(g_toggleGroups.size()) + 20.0f);
+		float computedHeight = 45.0f * static_cast<float>(g_toggleGroups.size()) + 20.0f;
+		float childHeight = (computedHeight < 600.0f) ? computedHeight : 600.0f;
 		ImGui::BeginChild("##grouporder_inline", ImVec2(0, childHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
 
 		for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); ++i)

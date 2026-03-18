@@ -217,13 +217,22 @@ void loadShaderTogglerIniFile()
 		return;
 	}
 
-	const int numberOfGroups = iniFile.GetInt("AmountGroups", "General");
+	// Try custom format first
+	int numberOfGroups = iniFile.GetInt("GTAmountGroups", "General");
+	bool usingCustomFormat = true;
 
-	// Legacy/old format fallback
+	// Fall back to regular ShaderToggler format
+	if (numberOfGroups == INT_MIN)
+	{
+		numberOfGroups = iniFile.GetInt("AmountGroups", "General");
+		usingCustomFormat = false;
+	}
+
+	// Legacy pre-group format fallback
 	if (numberOfGroups == INT_MIN)
 	{
 		addDefaultGroup();
-		g_toggleGroups[0].loadState(iniFile, -1);
+		g_toggleGroups[0].loadState(iniFile, -1, false);
 		saveShaderTogglerIniFile();
 		return;
 	}
@@ -232,27 +241,31 @@ void loadShaderTogglerIniFile()
 	for (int i = 0; i < numberOfGroups; i++)
 	{
 		g_toggleGroups.push_back(ToggleGroup("", ToggleGroup::getNewGroupId()));
-		g_toggleGroups.back().loadState(iniFile, i);
+		g_toggleGroups.back().loadState(iniFile, i, usingCustomFormat);
 	}
 
-	const std::string creator = iniFile.GetValue("Creator", "General");
-	const std::string savedStamp = iniFile.GetValue(GT_CACHE_KEY, "General");
-	const std::string currentStamp = buildIniSignature();
-
-	bool needsRepair = false;
-
-	if (creator != GT_CREATOR)
-		needsRepair = true;
-
-	if (savedStamp != currentStamp)
-		needsRepair = true;
-
-	if (!fileContainsTopAndBottomWatermark(g_iniFileName))
-		needsRepair = true;
-
-	if (needsRepair)
+	// Only enforce watermark/signature on custom files
+	if (usingCustomFormat)
 	{
-		saveShaderTogglerIniFile();
+		const std::string creator = iniFile.GetValue("Creator", "General");
+		const std::string savedStamp = iniFile.GetValue(GT_CACHE_KEY, "General");
+		const std::string currentStamp = buildIniSignature();
+
+		bool needsRepair = false;
+
+		if (creator != GT_CREATOR)
+			needsRepair = true;
+
+		if (savedStamp != currentStamp)
+			needsRepair = true;
+
+		if (!fileContainsTopAndBottomWatermark(g_iniFileName))
+			needsRepair = true;
+
+		if (needsRepair)
+		{
+			saveShaderTogglerIniFile();
+		}
 	}
 }
 
@@ -260,13 +273,14 @@ void saveShaderTogglerIniFile()
 {
 	CDataFile iniFile;
 
-	iniFile.SetInt("AmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
+	// Save only in custom format
+	iniFile.SetInt("GTAmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
 	iniFile.SetValue("Creator", GT_CREATOR, "", "General");
 	iniFile.SetValue(GT_CACHE_KEY, buildIniSignature(), "", "General");
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
-		g_toggleGroups[i].saveState(iniFile, i);
+		g_toggleGroups[i].saveState(iniFile, i, true);
 	}
 
 	iniFile.SetFileName(g_iniFileName);

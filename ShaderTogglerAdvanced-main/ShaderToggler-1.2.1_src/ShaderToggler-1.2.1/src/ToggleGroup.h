@@ -48,10 +48,9 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
-		void loadState(class CDataFile& iniFile, int index);
-		void saveState(class CDataFile& iniFile, int index) const;
+		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
+		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
-		// intentional duplicate helper
 		ToggleGroup makeDuplicate() const;
 
 	private:

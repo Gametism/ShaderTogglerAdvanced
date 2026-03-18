@@ -1,11 +1,3 @@
-///////////////////////////////////////////////////////////////////////
-//
-// Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
-// which allows you to define groups of shaders to toggle them on/off
-// with one key press.
-//
-/////////////////////////////////////////////////////////////////////////
-
 #include "ToggleGroup.h"
 #include "CDataFile.h"
 #include <sstream>
@@ -91,11 +83,10 @@ namespace ShaderToggler
 		return copy;
 	}
 
-	void ToggleGroup::loadState(CDataFile& iniFile, int index)
+	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
 
-		// Legacy pre-1.0 format support: only PixelShaders / VertexShaders / ComputeShaders sections
 		if (index < 0)
 		{
 			int amount = iniFile.GetInt("AmountHashes", "PixelShaders");
@@ -103,9 +94,7 @@ namespace ShaderToggler
 			{
 				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "PixelShaders");
 				if (hash != UINT_MAX)
-				{
 					m_pixelShaderHashes.insert(hash);
-				}
 			}
 
 			amount = iniFile.GetInt("AmountHashes", "VertexShaders");
@@ -113,9 +102,7 @@ namespace ShaderToggler
 			{
 				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "VertexShaders");
 				if (hash != UINT_MAX)
-				{
 					m_vertexShaderHashes.insert(hash);
-				}
 			}
 
 			amount = iniFile.GetInt("AmountHashes", "ComputeShaders");
@@ -123,24 +110,17 @@ namespace ShaderToggler
 			{
 				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "ComputeShaders");
 				if (hash != UINT_MAX)
-				{
 					m_computeShaderHashes.insert(hash);
-				}
 			}
 
-			// Legacy format had no group name / startup flag / key per group
 			m_name = "Default";
 			m_activeAtStartup = false;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			return;
 		}
 
-		// Original group-based format:
-		// [Group0]
-		// [Group0_PixelShaders]
-		// [Group0_VertexShaders]
-		// [Group0_ComputeShaders]
-		const std::string sectionRoot = "Group" + std::to_string(index);
+		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
+		const std::string sectionRoot = prefix + std::to_string(index);
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
@@ -150,9 +130,7 @@ namespace ShaderToggler
 		{
 			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), vertexHashesCategory);
 			if (hash != UINT_MAX)
-			{
 				m_vertexShaderHashes.insert(hash);
-			}
 		}
 
 		amountShaders = iniFile.GetInt("AmountHashes", pixelHashesCategory);
@@ -160,9 +138,7 @@ namespace ShaderToggler
 		{
 			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), pixelHashesCategory);
 			if (hash != UINT_MAX)
-			{
 				m_pixelShaderHashes.insert(hash);
-			}
 		}
 
 		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
@@ -170,34 +146,27 @@ namespace ShaderToggler
 		{
 			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
 			if (hash != UINT_MAX)
-			{
 				m_computeShaderHashes.insert(hash);
-			}
 		}
 
 		m_name = iniFile.GetValue("Name", sectionRoot);
 		if (m_name.empty())
-		{
 			m_name = "Default";
-		}
 
 		const uint32_t toggleKeyValue = iniFile.GetUInt("ToggleKey", sectionRoot);
 		if (toggleKeyValue == UINT_MAX)
-		{
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
-		}
 		else
-		{
 			m_toggleKey = KeyData::fromInt(toggleKeyValue);
-		}
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
 	}
 
-	void ToggleGroup::saveState(CDataFile& iniFile, int index) const
+	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
 	{
-		const std::string sectionRoot = "Group" + std::to_string(index);
+		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
+		const std::string sectionRoot = prefix + std::to_string(index);
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";

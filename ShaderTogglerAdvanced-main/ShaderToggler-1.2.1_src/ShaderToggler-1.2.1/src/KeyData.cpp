@@ -4,35 +4,6 @@
 // which allows you to define groups of shaders to toggle them on/off 
 // with one key press.
 //
-// Based on the original ShaderToggler by Frans 'Otis_Inf' Bouma.
-// (c) Frans 'Otis_Inf' Bouma. All rights reserved.
-//
-// https://github.com/FransBouma/ShaderToggler
-//
-// Modifications (including active-at-startup - x86, group reordering, and UI changes)
-// (c) 2025 Sven 'Gametism' Königsmann. All rights reserved.
-// 
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met :
-//
-//  * Redistributions of source code must retain the above copyright notices,
-//    this list of conditions, and the following disclaimer.
-//
-//  * Redistributions in binary form must reproduce the above copyright notices,
-//    this list of conditions, and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE
-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
 
 #include "KeyData.h"
@@ -93,7 +64,6 @@ namespace ShaderToggler
 
 	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime)
 	{
-		// keys below 7 aren't interesting
 		for (int i = 7; i < 256; i++)
 		{
 			switch (i)
@@ -116,7 +86,7 @@ namespace ShaderToggler
 		setKeyAsString();
 	}
 
-	bool KeyData::isKeyPressed(const reshade::api::effect_runtime* runtime)
+	bool KeyData::isKeyPressed(const reshade::api::effect_runtime* runtime) const
 	{
 		if (_keyCode == 0)
 		{
@@ -136,7 +106,6 @@ namespace ShaderToggler
 
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
-		// from ReShade
 		static const char *keyboard_keys[256] = {
 			"", "Left Mouse", "Right Mouse", "Cancel", "Middle Mouse", "X1 Mouse", "X2 Mouse", "", "Backspace", "Tab", "", "", "Clear", "Enter", "", "",
 			"Shift", "Control", "Alt", "Pause", "Caps Lock", "", "", "", "", "", "", "Escape", "", "", "", "",
@@ -169,25 +138,12 @@ namespace ShaderToggler
 
 		_keyAsString.clear();
 
-		if (_altRequired)
-		{
-			_keyAsString.append("Alt + ");
-		}
-		if (_ctrlRequired)
-		{
-			_keyAsString.append("Ctrl + ");
-		}
-		if (_shiftRequired)
-		{
-			_keyAsString.append("Shift + ");
-		}
-		if (_keyCode > 0)
-		{
-			_keyAsString.append(vkCodeToString(_keyCode));
-		}
+		if (_altRequired) _keyAsString.append("Alt + ");
+		if (_ctrlRequired) _keyAsString.append("Ctrl + ");
+		if (_shiftRequired) _keyAsString.append("Shift + ");
+		if (_keyCode > 0) _keyAsString.append(vkCodeToString(_keyCode));
 	}
 
-	// Compatibility functions for ToggleGroup
 	std::string KeyData::toString() const
 	{
 		return _keyAsString;

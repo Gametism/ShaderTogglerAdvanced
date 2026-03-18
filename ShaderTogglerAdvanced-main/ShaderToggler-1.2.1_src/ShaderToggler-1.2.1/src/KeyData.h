@@ -37,54 +37,27 @@
 #pragma once
 
 #include <reshade_api.hpp>
-
 #include "stdafx.h"
 
 namespace ShaderToggler
 {
-	/// <summary>
-	/// Class which is used to contain keybinding data
-	/// </summary>
 	class KeyData
 	{
 	public:
 		KeyData();
 
-		/// <summary>
-		/// Ini file variant which has ctrl/shift/alt requirements baked in.
-		/// </summary>
-		/// <param name="newKeyValue"></param>
 		void setKeyFromIniFile(uint32_t newKeyValue);
-		/// <summary>
-		/// Sets the passed in vk keycode as the key to use for 
-		/// </summary>
-		/// <param name="newKeyValue"></param>
-		/// <param name="shiftRequired"></param>
-		/// <param name="altRequired"></param>
-		/// <param name="ctrlRequired"></param>
-		void setKey(uint8_t newKeyValue, bool shiftRequired=false, bool altRequired=false, bool ctrlRequired=false);
+		void setKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		uint32_t getKeyForIniFile() const;
 		void clear();
-		/// <summary>
-		/// Used for when the instance of this class is used to collect temporary keybinding data for editing
-		/// </summary>
-		/// <param name="runtime"></param>
 		void collectKeysPressed(const reshade::api::effect_runtime* runtime);
-		/// <summary>
-		/// Returns true if the keyboard shortcut defined by this instance is currently pressed down
-		/// </summary>
-		/// <param name="runtime"></param>
-		/// <returns></returns>
-		
-		/// <summary>
-		/// Returns true if the key is currently being held down (level-triggered).
-		/// </summary>
+
 		bool isKeyDown(const reshade::api::effect_runtime* runtime)
 		{
 			if (!_keyCode) return false;
-			const bool altPressed   = runtime->is_key_down(VK_MENU);
+			const bool altPressed = runtime->is_key_down(VK_MENU);
 			const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
-			const bool ctrlPressed  = runtime->is_key_down(VK_CONTROL);
+			const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
 
 			bool toReturn = runtime->is_key_down(_keyCode);
 			toReturn &= ((_altRequired && altPressed) || (!_altRequired && !altPressed));
@@ -92,19 +65,20 @@ namespace ShaderToggler
 			toReturn &= ((_ctrlRequired && ctrlPressed) || (!_ctrlRequired && !ctrlPressed));
 			return toReturn;
 		}
-bool isKeyPressed(const reshade::api::effect_runtime* runtime);
 
-		/// <summary>
-		/// Returns a usable description for the keyboard shortcut, or 'Press a key' if undefined/empty
-		/// </summary>
-		/// <returns></returns>
-		std::string getKeyAsString() { return _keyAsString;}
-		uint8_t getKeyCode() { return _keyCode;}
+		bool isKeyPressed(const reshade::api::effect_runtime* runtime);
+
+		std::string getKeyAsString() { return _keyAsString; }
+		uint8_t getKeyCode() { return _keyCode; }
 		bool isValid() { return _keyCode > 0; }
+
+		// Compatibility helpers for ToggleGroup / serialization
+		std::string toString() const;
+		int toInt() const;
+		static KeyData fromInt(uint32_t value);
 
 	private:
 		static std::string vkCodeToString(uint8_t vkCode);
-
 		void setKeyAsString();
 
 		uint8_t _keyCode;
@@ -112,7 +86,5 @@ bool isKeyPressed(const reshade::api::effect_runtime* runtime);
 		bool _altRequired;
 		bool _ctrlRequired;
 		std::string _keyAsString;
-
 	};
 }
-

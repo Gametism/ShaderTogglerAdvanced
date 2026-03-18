@@ -34,22 +34,25 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
+
 #include "KeyData.h"
 
 namespace ShaderToggler
 {
-	KeyData::KeyData(): _keyCode(0), _shiftRequired(false), _altRequired(false), _ctrlRequired(false)
+	KeyData::KeyData() : _keyCode(0), _shiftRequired(false), _altRequired(false), _ctrlRequired(false)
 	{
+		setKeyAsString();
 	}
-
 
 	void KeyData::setKeyFromIniFile(uint32_t newKeyValue)
 	{
-		if(newKeyValue==0)
+		if (newKeyValue == 0)
 		{
+			clear();
 			return;
 		}
-		_keyCode = ((newKeyValue >> 24) & 0xFF);;
+
+		_keyCode = static_cast<uint8_t>((newKeyValue >> 24) & 0xFF);
 		_altRequired = ((newKeyValue >> 16) & 0xFF) == 0x01;
 		_ctrlRequired = ((newKeyValue >> 8) & 0xFF) == 0x01;
 		_shiftRequired = (newKeyValue & 0xFF) == 0x01;
@@ -58,10 +61,12 @@ namespace ShaderToggler
 
 	void KeyData::setKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
-		if(newKeyValue==0)
+		if (newKeyValue == 0)
 		{
+			clear();
 			return;
 		}
+
 		_keyCode = newKeyValue;
 		_ctrlRequired = ctrlRequired;
 		_shiftRequired = shiftRequired;
@@ -69,12 +74,13 @@ namespace ShaderToggler
 		setKeyAsString();
 	}
 
-
 	uint32_t KeyData::getKeyForIniFile() const
 	{
-		return (_keyCode & 0xFF) << 24 | ((_altRequired ? 1 : 0) << 16) | ((_ctrlRequired ? 1 : 0) << 8) | ((_shiftRequired ? 1 : 0));
+		return ((_keyCode & 0xFF) << 24) |
+			   ((_altRequired ? 1u : 0u) << 16) |
+			   ((_ctrlRequired ? 1u : 0u) << 8) |
+			   (_shiftRequired ? 1u : 0u);
 	}
-
 
 	void KeyData::clear()
 	{
@@ -85,36 +91,40 @@ namespace ShaderToggler
 		setKeyAsString();
 	}
 
-
 	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime)
 	{
-		// keys below 7 aren't interesting.
-		for(int i=7;i<256;i++)
+		// keys below 7 aren't interesting
+		for (int i = 7; i < 256; i++)
 		{
-			switch(i)
+			switch (i)
 			{
-				case VK_MENU:
-				case VK_CONTROL:
-				case VK_SHIFT:
-					break;
-				default:
-					if(runtime->is_key_down(i))
-					{
-						_keyCode = i;
-						_altRequired = runtime->is_key_down(VK_MENU);
-						_ctrlRequired = runtime->is_key_down(VK_CONTROL);
-						_shiftRequired = runtime->is_key_down(VK_SHIFT);
-					}
+			case VK_MENU:
+			case VK_CONTROL:
+			case VK_SHIFT:
+				break;
+			default:
+				if (runtime->is_key_down(i))
+				{
+					_keyCode = static_cast<uint8_t>(i);
+					_altRequired = runtime->is_key_down(VK_MENU);
+					_ctrlRequired = runtime->is_key_down(VK_CONTROL);
+					_shiftRequired = runtime->is_key_down(VK_SHIFT);
+				}
+				break;
 			}
 		}
 		setKeyAsString();
 	}
 
-
 	bool KeyData::isKeyPressed(const reshade::api::effect_runtime* runtime)
 	{
+		if (_keyCode == 0)
+		{
+			return false;
+		}
+
 		bool toReturn = runtime->is_key_pressed(_keyCode);
-		const bool altPressed = runtime->is_key_down(VK_MENU);;
+		const bool altPressed = runtime->is_key_down(VK_MENU);
 		const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
 		const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
 
@@ -123,7 +133,6 @@ namespace ShaderToggler
 		toReturn &= ((_ctrlRequired && ctrlPressed) || (!_ctrlRequired && !ctrlPressed));
 		return toReturn;
 	}
-
 
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
@@ -150,16 +159,16 @@ namespace ShaderToggler
 		return keyboard_keys[vkCode];
 	}
 
-
 	void KeyData::setKeyAsString()
 	{
 		if (!_altRequired && !_ctrlRequired && !_shiftRequired && (_keyCode <= 0))
 		{
-			// empty
 			_keyAsString = "Press a key";
 			return;
 		}
+
 		_keyAsString.clear();
+
 		if (_altRequired)
 		{
 			_keyAsString.append("Alt + ");
@@ -176,6 +185,23 @@ namespace ShaderToggler
 		{
 			_keyAsString.append(vkCodeToString(_keyCode));
 		}
+	}
 
+	// Compatibility functions for ToggleGroup
+	std::string KeyData::toString() const
+	{
+		return _keyAsString;
+	}
+
+	int KeyData::toInt() const
+	{
+		return static_cast<int>(getKeyForIniFile());
+	}
+
+	KeyData KeyData::fromInt(uint32_t value)
+	{
+		KeyData k;
+		k.setKeyFromIniFile(value);
+		return k;
 	}
 }

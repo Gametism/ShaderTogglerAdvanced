@@ -1,7 +1,7 @@
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
-// which allows you to define groups of shaders to toggle them on/off 
+// which allows you to define groups of shaders to toggle them on/off
 // with one key press.
 //
 // Based on the original ShaderToggler by Frans 'Otis_Inf' Bouma.
@@ -11,144 +11,857 @@
 //
 // Modifications (including active-at-startup - x86, group reordering, and UI changes)
 // (c) 2025 Sven 'Gametism' Königsmann. All rights reserved.
-// 
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met :
-//
-//  * Redistributions of source code must retain the above copyright notices,
-//    this list of conditions, and the following disclaimer.
-//
-//  * Redistributions in binary form must reproduce the above copyright notices,
-//    this list of conditions, and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE
-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
+
+#define IMGUI_DISABLE_INCLUDE_IMCONFIG_H
+#define ImTextureID unsigned long long // Change ImGui texture ID type to that of a 'reshade::api::resource_view' handle
+
 #include <imgui.h>
+#include <reshade.hpp>
+#include "crc32_hash.hpp"
+#include "ShaderManager.h"
+#include "CDataFile.h"
+#include "ToggleGroup.h"
+#include "KeyData.h"
 #include <vector>
-#include <string>
+#include <filesystem>
+#include <Windows.h>
+#include <chrono>
 #include <algorithm>
+#include <atomic>
+#include <string>
 
-// -------------------
-// Simple stub classes to replace KeyData & CDataFile
-// -------------------
-struct KeyData {
-    int key = 0;
-    std::string toString() const { return std::to_string(key); }
-    void fromInt(int k) { key = k; }
-    int toInt() const { return key; }
+void saveShaderTogglerIniFile();
+
+using namespace reshade::api;
+using namespace ShaderToggler;
+
+extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";
+extern "C" __declspec(dllexport) const char *DESCRIPTION = "Add-on which allows you to define groups of game shaders to toggle on/off with one key press.";
+
+struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataContainer
+{
+	uint64_t activePixelShaderPipeline;
+	uint64_t activeVertexShaderPipeline;
+	uint64_t activeComputeShaderPipeline;
 };
 
-// Stub for shader data saving (CDataFile)
-void saveShaderTogglerIniFile() {
-    // Stub: do nothing for now to avoid compilation errors
+#define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
+#define HASH_FILE_NAME "ShaderToggler.ini"
+
+static ShaderManager g_pixelShaderManager;
+static ShaderManager g_vertexShaderManager;
+static ShaderManager g_computeShaderManager;
+static KeyData g_keyCollector;
+static std::atomic_uint32_t g_activeCollectorFrameCounter = 0;
+static std::vector<ToggleGroup> g_toggleGroups;
+static std::atomic_int g_toggleGroupIdKeyBindingEditing = -1;
+static std::atomic_int g_toggleGroupIdShaderEditing = -1;
+static float g_overlayOpacity = 1.0f;
+static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
+static std::string g_iniFileName = "";
+
+// Hold-to-cycle state + helpers
+static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
+static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
+static int s_holdRepeatMs = 200;
+
+static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
+{
+	bool down = runtime->is_key_down(vk_numpad) || runtime->is_key_down(vk_nav);
+	down = down || ((GetAsyncKeyState(vk_numpad) & 0x8000) != 0) || ((GetAsyncKeyState(vk_nav) & 0x8000) != 0);
+	return down;
 }
 
-// -------------------
-// Toggle structure
-// -------------------
-struct Toggle {
-    std::string name;
-    bool enabled = false;
-    KeyData key;
-};
-
-// Global toggle list
-std::vector<Toggle> toggles;
-
-// -------------------
-// ImGui UI
-// -------------------
-void ShowToggleWindow() {
-    // Make window big enough to fit all toggles
-    ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
-    ImGui::Begin("ShaderToggler Advanced");
-
-    // Drag & drop list for toggles
-    for (size_t i = 0; i < toggles.size(); i++) {
-        Toggle& t = toggles[i];
-
-        ImGui::PushID(static_cast<int>(i));
-
-        ImGui::Checkbox(t.name.c_str(), &t.enabled);
-        ImGui::SameLine();
-        ImGui::Text("Key: %s", t.key.toString().c_str());
-
-        // Duplicate button
-        ImGui::SameLine();
-        if (ImGui::Button("Duplicate")) {
-            toggles.push_back(t); // duplicate this toggle
-        }
-
-        // Drag & drop reordering
-        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-            ImGui::SetDragDropPayload("DND_TOGGLE", &i, sizeof(size_t));
-            ImGui::Text("Moving %s", t.name.c_str());
-            ImGui::EndDragDropSource();
-        }
-
-        if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("DND_TOGGLE")) {
-                size_t srcIndex = *(const size_t*)payload->Data;
-                if (srcIndex != i) {
-                    std::swap(toggles[i], toggles[srcIndex]);
-                }
-            }
-            ImGui::EndDragDropTarget();
-        }
-
-        ImGui::PopID();
-    }
-
-    // Add new toggle button
-    if (ImGui::Button("Add New Toggle")) {
-        toggles.push_back({ "New Toggle", false, KeyData() });
-    }
-
-    // Save button
-    if (ImGui::Button("Save Toggles")) {
-        saveShaderTogglerIniFile(); // stubbed
-    }
-
-    ImGui::End();
+static bool is_key_pressed_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
+{
+	return runtime->is_key_pressed(vk_numpad) || runtime->is_key_pressed(vk_nav);
 }
 
-// -------------------
-// Main application loop (stub for demo)
-// -------------------
-int main() {
-    // Initialize ImGui context, platform, renderer here
-    // This is a stub. In your real app, keep your platform init
+/// <summary>
+/// Calculates a crc32 hash from the passed in shader bytecode.
+/// </summary>
+static uint32_t calculateShaderHash(void* shaderData)
+{
+	if (nullptr == shaderData)
+	{
+		return 0;
+	}
 
-    // Example: populate with initial toggles
-    toggles.push_back({ "Toggle 1", false, KeyData() });
-    toggles.push_back({ "Toggle 2", true, KeyData() });
+	const auto shaderDesc = *static_cast<shader_desc *>(shaderData);
+	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
+}
 
-    // Main loop (pseudo)
-    while (true) {
-        // Start frame
-        ImGui::NewFrame();
+/// <summary>
+/// Adds a default group with VK_CAPITAL as toggle key.
+/// </summary>
+void addDefaultGroup()
+{
+	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
+	toAdd.setToggleKey(VK_CAPITAL, false, false, false);
+	g_toggleGroups.push_back(toAdd);
+}
 
-        // Show our toggle window
-        ShowToggleWindow();
+/// <summary>
+/// Loads the defined hashes and groups from ShaderToggler.ini.
+/// </summary>
+void loadShaderTogglerIniFile()
+{
+	CDataFile iniFile;
+	if (!iniFile.Load(g_iniFileName))
+	{
+		return;
+	}
 
-        // Render
-        ImGui::Render();
+	const int numberOfGroups = iniFile.GetInt("AmountGroups", "General");
+	if (numberOfGroups == INT_MIN)
+	{
+		addDefaultGroup();
+		g_toggleGroups[0].loadState(iniFile, -1); // old format
+		return;
+	}
 
-        // Break condition for demo (replace with your window loop)
-        // For now just exit after first frame
-        break;
-    }
+	for (int i = 0; i < numberOfGroups; i++)
+	{
+		g_toggleGroups.push_back(ToggleGroup("", ToggleGroup::getNewGroupId()));
+		g_toggleGroups.back().loadState(iniFile, i);
+	}
+}
 
-    return 0;
+/// <summary>
+/// Saves the currently known toggle groups with their shader hashes.
+/// </summary>
+void saveShaderTogglerIniFile()
+{
+	CDataFile iniFile;
+	iniFile.SetInt("AmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
+
+	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
+	{
+		g_toggleGroups[i].saveState(iniFile, i);
+	}
+
+	iniFile.SetFileName(g_iniFileName);
+	iniFile.Save();
+}
+
+static void onInitCommandList(command_list *commandList)
+{
+	commandList->create_private_data<CommandListDataContainer>();
+}
+
+static void onDestroyCommandList(command_list *commandList)
+{
+	commandList->destroy_private_data<CommandListDataContainer>();
+}
+
+static void onResetCommandList(command_list *commandList)
+{
+	CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+	commandListData.activePixelShaderPipeline = static_cast<uint64_t>(-1);
+	commandListData.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
+	commandListData.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
+}
+
+static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
+{
+	for (uint32_t i = 0; i < subobjectCount; ++i)
+	{
+		switch (subobjects[i].type)
+		{
+		case pipeline_subobject_type::vertex_shader:
+			g_vertexShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			break;
+		case pipeline_subobject_type::pixel_shader:
+			g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			break;
+		case pipeline_subobject_type::compute_shader:
+			g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+static void onDestroyPipeline(device *, pipeline pipelineHandle)
+{
+	g_pixelShaderManager.removeHandle(pipelineHandle.handle);
+	g_vertexShaderManager.removeHandle(pipelineHandle.handle);
+	g_computeShaderManager.removeHandle(pipelineHandle.handle);
+}
+
+static void displayIsPartOfToggleGroup()
+{
+	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+	ImGui::SameLine();
+	ImGui::Text(" Shader is part of this toggle group.");
+	ImGui::PopStyleColor();
+}
+
+static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shaderType)
+{
+	if (toDisplay.isInHuntingMode())
+	{
+		ImGui::Text("# of %s shaders active: %d. # of %s shaders in group: %d",
+			shaderType, toDisplay.getAmountShaderHashesCollected(), shaderType, toDisplay.getMarkedShaderCount());
+		ImGui::Text("Current selected %s shader: %d / %d.",
+			shaderType, toDisplay.getActiveHuntedShaderIndex(), toDisplay.getAmountShaderHashesCollected());
+		if (toDisplay.isHuntedShaderMarked())
+		{
+			displayIsPartOfToggleGroup();
+		}
+	}
+}
+
+static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shaderType)
+{
+	ImGui::Text("# of pipelines with %s shaders: %d. # of different %s shaders gathered: %d.",
+		shaderType, toDisplay.getPipelineCount(), shaderType, toDisplay.getShaderCount());
+}
+
+static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
+{
+	if (g_toggleGroupIdShaderEditing >= 0)
+	{
+		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
+		ImGui::SetNextWindowPos(ImVec2(10, 10));
+		if (!ImGui::Begin("ShaderTogglerInfo", nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings))
+		{
+			ImGui::End();
+			return;
+		}
+
+		std::string editingGroupName = "";
+		for (auto& group : g_toggleGroups)
+		{
+			if (group.getId() == g_toggleGroupIdShaderEditing)
+			{
+				editingGroupName = group.getName();
+				break;
+			}
+		}
+
+		displayShaderManagerStats(g_vertexShaderManager, "vertex");
+		displayShaderManagerStats(g_pixelShaderManager, "pixel");
+		displayShaderManagerStats(g_computeShaderManager, "compute");
+
+		if (g_activeCollectorFrameCounter > 0)
+		{
+			const uint32_t counterValue = g_activeCollectorFrameCounter;
+			ImGui::Text("Collecting active shaders... frames to go: %d", counterValue);
+		}
+		else
+		{
+			if (g_vertexShaderManager.isInHuntingMode() || g_pixelShaderManager.isInHuntingMode() || g_computeShaderManager.isInHuntingMode())
+			{
+				ImGui::Text("Editing the shaders for group: %s", editingGroupName.c_str());
+			}
+			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
+			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
+			displayShaderManagerInfo(g_computeShaderManager, "compute");
+		}
+		ImGui::End();
+	}
+}
+
+static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
+{
+	if (nullptr != commandList && pipelineHandle.handle != 0)
+	{
+		const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
+		const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
+		const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
+
+		if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
+		{
+			return;
+		}
+
+		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+		if (g_activeCollectorFrameCounter > 0)
+		{
+			if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		}
+		else
+		{
+			commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
+			commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
+			commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
+		}
+
+		if ((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader && handleHasPixelShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activePixelShaderPipeline = pipelineHandle.handle;
+		}
+		if ((stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader && handleHasVertexShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
+		}
+		if ((stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader && handleHasComputeShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
+		}
+	}
+}
+
+/// <summary>
+/// Returns true if the command list specified has one or more shader hashes
+/// which are currently marked to be hidden.
+/// </summary>
+bool blockDrawCallForCommandList(command_list* commandList)
+{
+	if (nullptr == commandList)
+	{
+		return false;
+	}
+
+	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
+	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
+	for (auto& group : g_toggleGroups)
+	{
+		for (auto hash : group.getPixelShaderHashes())
+		{
+			if (group.isActive() && hash == shaderHash)
+			{
+				blockCall = true;
+				break;
+			}
+		}
+	}
+
+	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
+	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
+	for (auto& group : g_toggleGroups)
+	{
+		for (auto hash : group.getVertexShaderHashes())
+		{
+			if (group.isActive() && hash == shaderHash)
+			{
+				blockCall = true;
+				break;
+			}
+		}
+	}
+
+	shaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
+	blockCall |= g_computeShaderManager.isBlockedShader(shaderHash);
+	for (auto& group : g_toggleGroups)
+	{
+		for (auto hash : group.getComputeShaderHashes())
+		{
+			if (group.isActive() && hash == shaderHash)
+			{
+				blockCall = true;
+				break;
+			}
+		}
+	}
+
+	return blockCall;
+}
+
+static bool onDraw(command_list* commandList, uint32_t, uint32_t, uint32_t, uint32_t)
+{
+	return blockDrawCallForCommandList(commandList);
+}
+
+static bool onDrawIndexed(command_list* commandList, uint32_t, uint32_t, uint32_t, int32_t, uint32_t)
+{
+	return blockDrawCallForCommandList(commandList);
+}
+
+static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource, uint64_t, uint32_t, uint32_t)
+{
+	switch (type)
+	{
+	case indirect_command::unknown:
+	case indirect_command::draw:
+	case indirect_command::draw_indexed:
+	case indirect_command::dispatch:
+		return blockDrawCallForCommandList(commandList);
+	default:
+		return false;
+	}
+}
+
+static void onReshadePresent(effect_runtime* runtime)
+{
+	if (g_activeCollectorFrameCounter > 0)
+	{
+		--g_activeCollectorFrameCounter;
+	}
+
+	for (auto& group : g_toggleGroups)
+	{
+		if (group.getToggleKey().isKeyPressed(runtime))
+		{
+			group.setActive(!group.isActive());
+
+			if (group.getId() == g_toggleGroupIdShaderEditing)
+			{
+				g_vertexShaderManager.toggleHideMarkedShaders();
+				g_pixelShaderManager.toggleHideMarkedShaders();
+				g_computeShaderManager.toggleHideMarkedShaders();
+			}
+		}
+	}
+
+	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
+	auto now = std::chrono::steady_clock::now();
+
+	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;
+	const int NP2 = VK_NUMPAD2, NAV2 = VK_DOWN;
+	const int NP3 = VK_NUMPAD3, NAV3 = VK_NEXT;
+	const int NP4 = VK_NUMPAD4, NAV4 = VK_LEFT;
+	const int NP5 = VK_NUMPAD5, NAV5 = VK_CLEAR;
+	const int NP6 = VK_NUMPAD6, NAV6 = VK_RIGHT;
+	const int NP7 = VK_NUMPAD7, NAV7 = VK_HOME;
+	const int NP8 = VK_NUMPAD8, NAV8 = VK_UP;
+	const int NP9 = VK_NUMPAD9, NAV9 = VK_PRIOR;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP1, NAV1) ||
+		(is_key_down_numpad_or_nav(runtime, NP1, NAV1) && (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)))
+	{
+		g_pixelShaderManager.huntPreviousShader(ctrlDown);
+		s_lastNP1 = now; s_np1Held = true;
+	}
+	if (!is_key_down_numpad_or_nav(runtime, NP1, NAV1)) s_np1Held = false;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP2, NAV2) ||
+		(is_key_down_numpad_or_nav(runtime, NP2, NAV2) && (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)))
+	{
+		g_pixelShaderManager.huntNextShader(ctrlDown);
+		s_lastNP2 = now; s_np2Held = true;
+	}
+	if (!is_key_down_numpad_or_nav(runtime, NP2, NAV2)) s_np2Held = false;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP3, NAV3))
+	{
+		g_pixelShaderManager.toggleMarkOnHuntedShader();
+	}
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP4, NAV4) ||
+		(is_key_down_numpad_or_nav(runtime, NP4, NAV4) && (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)))
+	{
+		g_vertexShaderManager.huntPreviousShader(ctrlDown);
+		s_lastNP4 = now; s_np4Held = true;
+	}
+	if (!is_key_down_numpad_or_nav(runtime, NP4, NAV4)) s_np4Held = false;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP5, NAV5) ||
+		(is_key_down_numpad_or_nav(runtime, NP5, NAV5) && (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)))
+	{
+		g_vertexShaderManager.huntNextShader(ctrlDown);
+		s_lastNP5 = now; s_np5Held = true;
+	}
+	if (!is_key_down_numpad_or_nav(runtime, NP5, NAV5)) s_np5Held = false;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP6, NAV6))
+	{
+		g_vertexShaderManager.toggleMarkOnHuntedShader();
+	}
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP7, NAV7) ||
+		(is_key_down_numpad_or_nav(runtime, NP7, NAV7) && (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)))
+	{
+		g_computeShaderManager.huntPreviousShader(ctrlDown);
+		s_lastNP7 = now; s_np7Held = true;
+	}
+	if (!is_key_down_numpad_or_nav(runtime, NP7, NAV7)) s_np7Held = false;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP8, NAV8) ||
+		(is_key_down_numpad_or_nav(runtime, NP8, NAV8) && (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)))
+	{
+		g_computeShaderManager.huntNextShader(ctrlDown);
+		s_lastNP8 = now; s_np8Held = true;
+	}
+	if (!is_key_down_numpad_or_nav(runtime, NP8, NAV8)) s_np8Held = false;
+
+	if (is_key_pressed_numpad_or_nav(runtime, NP9, NAV9))
+	{
+		g_computeShaderManager.toggleMarkOnHuntedShader();
+	}
+}
+
+void endKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
+{
+	if (acceptCollectedBinding && g_toggleGroupIdKeyBindingEditing == groupEditing.getId() && g_keyCollector.isValid())
+	{
+		groupEditing.setToggleKey(g_keyCollector);
+	}
+	g_toggleGroupIdKeyBindingEditing = -1;
+	g_keyCollector.clear();
+}
+
+void startKeyBindingEditing(ToggleGroup& groupEditing)
+{
+	if (g_toggleGroupIdKeyBindingEditing == groupEditing.getId())
+	{
+		return;
+	}
+	if (g_toggleGroupIdKeyBindingEditing >= 0)
+	{
+		endKeyBindingEditing(false, groupEditing);
+	}
+	g_toggleGroupIdKeyBindingEditing = groupEditing.getId();
+}
+
+void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
+{
+	if (acceptCollectedShaderHashes && g_toggleGroupIdShaderEditing == groupEditing.getId())
+	{
+		groupEditing.storeCollectedHashes(
+			g_pixelShaderManager.getMarkedShaderHashes(),
+			g_vertexShaderManager.getMarkedShaderHashes(),
+			g_computeShaderManager.getMarkedShaderHashes());
+
+		g_pixelShaderManager.stopHuntingMode();
+		g_vertexShaderManager.stopHuntingMode();
+		g_computeShaderManager.stopHuntingMode();
+	}
+	g_toggleGroupIdShaderEditing = -1;
+}
+
+void startShaderEditing(ToggleGroup& groupEditing)
+{
+	if (g_toggleGroupIdShaderEditing == groupEditing.getId())
+	{
+		return;
+	}
+	if (g_toggleGroupIdShaderEditing >= 0)
+	{
+		endShaderEditing(false, groupEditing);
+	}
+
+	g_toggleGroupIdShaderEditing = groupEditing.getId();
+	g_activeCollectorFrameCounter = g_startValueFramecountCollectionPhase;
+	g_pixelShaderManager.startHuntingMode(groupEditing.getPixelShaderHashes());
+	g_vertexShaderManager.startHuntingMode(groupEditing.getVertexShaderHashes());
+	g_computeShaderManager.startHuntingMode(groupEditing.getComputeShaderHashes());
+
+	groupEditing.clearHashes();
+}
+
+static void showHelpMarker(const char* desc)
+{
+	ImGui::TextDisabled("(?)");
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::BeginTooltip();
+		ImGui::PushTextWrapPos(450.0f);
+		ImGui::TextUnformatted(desc);
+		ImGui::PopTextWrapPos();
+		ImGui::EndTooltip();
+	}
+}
+
+static void displaySettings(reshade::api::effect_runtime* runtime)
+{
+	if (g_toggleGroupIdKeyBindingEditing >= 0)
+	{
+		g_keyCollector.collectKeysPressed(runtime);
+	}
+
+	if (ImGui::CollapsingHeader("General info and help"))
+	{
+		ImGui::PushTextWrapPos();
+		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex, pixel or compute shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled.");
+		ImGui::TextUnformatted("\nThe following keyboard shortcuts are used when you click a group's 'Change shaders' button:");
+		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pixel shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 1 / 2: previous/next marked pixel shader");
+		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pixel shader");
+		ImGui::TextUnformatted("* Numpad 4 / 5: previous/next vertex shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 4 / 5: previous/next marked vertex shader");
+		ImGui::TextUnformatted("* Numpad 6: mark/unmark current vertex shader");
+		ImGui::TextUnformatted("* Numpad 7 / 8: previous/next compute shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8: previous/next marked compute shader");
+		ImGui::TextUnformatted("* Numpad 9: mark/unmark current compute shader");
+		ImGui::PopTextWrapPos();
+	}
+
+	if (ImGui::CollapsingHeader("Shader selection parameters", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
+		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
+		ImGui::SameLine();
+		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally.");
+		ImGui::PopItemWidth();
+	}
+	ImGui::Separator();
+
+	if (ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		if (ImGui::Button(" New "))
+		{
+			addDefaultGroup();
+		}
+		ImGui::Separator();
+
+		std::vector<int> idsToRemove;
+
+		for (auto& group : g_toggleGroups)
+		{
+			ImGui::PushID(group.getId());
+			ImGui::AlignTextToFramePadding();
+
+			if (ImGui::Button("X"))
+			{
+				idsToRemove.push_back(group.getId());
+			}
+
+			ImGui::SameLine();
+			ImGui::Text(" %d ", group.getId());
+
+			ImGui::SameLine();
+			if (ImGui::Button("Edit"))
+			{
+				group.setEditing(true);
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Duplicate"))
+			{
+				g_toggleGroups.push_back(ToggleGroup(group));
+				saveShaderTogglerIniFile();
+			}
+
+			ImGui::SameLine();
+			if (g_toggleGroupIdShaderEditing >= 0)
+			{
+				if (g_toggleGroupIdShaderEditing == group.getId())
+				{
+					if (ImGui::Button(" Done "))
+					{
+						endShaderEditing(true, group);
+					}
+				}
+				else
+				{
+					ImGui::BeginDisabled(true);
+					ImGui::Button("      ");
+					ImGui::EndDisabled();
+				}
+			}
+			else
+			{
+				if (ImGui::Button("Change shaders"))
+				{
+					startShaderEditing(group);
+				}
+			}
+
+			ImGui::SameLine();
+			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", is active" : "");
+			if (group.isActiveAtStartup())
+			{
+				ImGui::SameLine();
+				ImGui::Text(" (Active at startup)");
+			}
+
+			if (group.isEditing())
+			{
+				ImGui::Separator();
+				ImGui::Text("Edit group %d", group.getId());
+
+				char tmpBuffer[150] = {};
+				strncpy_s(tmpBuffer, sizeof(tmpBuffer), group.getName().c_str(), _TRUNCATE);
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text("Name");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				ImGui::InputText("##Name", tmpBuffer, 149);
+				group.setName(tmpBuffer);
+				ImGui::PopItemWidth();
+
+				bool isKeyEditing = false;
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+				ImGui::Text("Key shortcut");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				std::string textBoxContents = (g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();
+
+				char keyBuf[128] = {};
+				strncpy_s(keyBuf, sizeof(keyBuf), textBoxContents.c_str(), _TRUNCATE);
+				ImGui::InputText("##Key shortcut", keyBuf, sizeof(keyBuf), ImGuiInputTextFlags_ReadOnly);
+
+				if (ImGui::IsItemClicked())
+				{
+					startKeyBindingEditing(group);
+				}
+				if (g_toggleGroupIdKeyBindingEditing == group.getId())
+				{
+					isKeyEditing = true;
+					ImGui::SameLine();
+					if (ImGui::Button("OK"))
+					{
+						endKeyBindingEditing(true, group);
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Cancel"))
+					{
+						endKeyBindingEditing(false, group);
+					}
+				}
+				ImGui::PopItemWidth();
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				bool isDefaultActive = group.isActiveAtStartup();
+				ImGui::Checkbox("Is active at startup", &isDefaultActive);
+				group.setIsActiveAtStartup(isDefaultActive);
+				ImGui::PopItemWidth();
+
+				if (!isKeyEditing)
+				{
+					if (ImGui::Button("OK"))
+					{
+						group.setEditing(false);
+						g_toggleGroupIdKeyBindingEditing = -1;
+						g_keyCollector.clear();
+						saveShaderTogglerIniFile();
+					}
+				}
+				ImGui::Separator();
+			}
+
+			ImGui::PopID();
+		}
+
+		if (!idsToRemove.empty())
+		{
+			g_toggleGroupIdKeyBindingEditing = -1;
+			g_keyCollector.clear();
+			g_toggleGroupIdShaderEditing = -1;
+			g_pixelShaderManager.stopHuntingMode();
+			g_vertexShaderManager.stopHuntingMode();
+			g_computeShaderManager.stopHuntingMode();
+
+			g_toggleGroups.erase(
+				std::remove_if(g_toggleGroups.begin(), g_toggleGroups.end(),
+					[&](const ToggleGroup& g)
+					{
+						return std::find(idsToRemove.begin(), idsToRemove.end(), g.getId()) != idsToRemove.end();
+					}),
+				g_toggleGroups.end());
+
+			saveShaderTogglerIniFile();
+		}
+
+		ImGui::Separator();
+		if (!g_toggleGroups.empty())
+		{
+			if (ImGui::Button("Save all Toggle Groups"))
+			{
+				saveShaderTogglerIniFile();
+			}
+		}
+	}
+
+	if (ImGui::CollapsingHeader("Group Order", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
+		ImGui::Separator();
+
+		float childHeight = std::min(600.0f, 45.0f * static_cast<float>(g_toggleGroups.size()) + 20.0f);
+		ImGui::BeginChild("##grouporder_inline", ImVec2(0, childHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
+
+		for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); ++i)
+		{
+			ImGui::PushID(i);
+			const std::string &name = g_toggleGroups[i].getName();
+			ImGui::Selectable(name.c_str(), false);
+
+			if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
+			{
+				ImGui::SetDragDropPayload("ST_GROUP_INDEX", &i, sizeof(int));
+				ImGui::Text("Move: %s", name.c_str());
+				ImGui::EndDragDropSource();
+			}
+
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ST_GROUP_INDEX"))
+				{
+					int src = *(const int*)payload->Data;
+					if (src != i)
+					{
+						auto tmp = g_toggleGroups[src];
+						g_toggleGroups.erase(g_toggleGroups.begin() + src);
+						if (src < i) i--;
+						g_toggleGroups.insert(g_toggleGroups.begin() + i, std::move(tmp));
+						saveShaderTogglerIniFile();
+					}
+				}
+				ImGui::EndDragDropTarget();
+			}
+			ImGui::PopID();
+		}
+
+		ImGui::EndChild();
+	}
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
+{
+	switch (fdwReason)
+	{
+	case DLL_PROCESS_ATTACH:
+	{
+		if (!reshade::register_addon(hModule))
+		{
+			return FALSE;
+		}
+
+		WCHAR buf[MAX_PATH];
+		const std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ? buf : std::filesystem::path();
+		const std::filesystem::path basePath = dllPath.parent_path();
+		g_iniFileName = (basePath / HASH_FILE_NAME).string();
+
+		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
+		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
+		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+		reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+		reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+		reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
+		reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+		reshade::register_event<reshade::addon_event::draw>(onDraw);
+		reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+		reshade::register_overlay(nullptr, &displaySettings);
+
+		loadShaderTogglerIniFile();
+	}
+	break;
+
+	case DLL_PROCESS_DETACH:
+		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
+		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
+		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+		reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+		reshade::unregister_event<reshade::addon_event::draw>(onDraw);
+		reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+		reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
+		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+		reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+		reshade::unregister_overlay(nullptr, &displaySettings);
+		reshade::unregister_addon(hModule);
+		break;
+	}
+
+	return TRUE;
 }

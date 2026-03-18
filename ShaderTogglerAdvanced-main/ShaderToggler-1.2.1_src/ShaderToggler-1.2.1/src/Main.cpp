@@ -9,13 +9,13 @@
 //
 // https://github.com/FransBouma/ShaderToggler
 //
-// Modifications (including active-at-startup - x86, group reordering, and UI changes)
-// (c) 2025 Sven 'Gametism' Königsmann. All rights reserved.
+// Modifications (including active-at-startup - x86, group reordering, duplication and UI changes)
+// (c) 2026 Sven 'Gametism' Königsmann. All rights reserved.
 //
 /////////////////////////////////////////////////////////////////////////
 
 #define IMGUI_DISABLE_INCLUDE_IMCONFIG_H
-#define ImTextureID unsigned long long // Change ImGui texture ID type to that of a 'reshade::api::resource_view' handle
+#define ImTextureID unsigned long long
 
 #include <imgui.h>
 #include <reshade.hpp>
@@ -31,6 +31,13 @@
 #include <algorithm>
 #include <atomic>
 #include <string>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
 
 void saveShaderTogglerIniFile();
 
@@ -62,7 +69,7 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
-// Hold-to-cycle state + helpers
+// Hold-to-cycle state
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 static int s_holdRepeatMs = 200;
@@ -79,9 +86,6 @@ static bool is_key_pressed_numpad_or_nav(reshade::api::effect_runtime* runtime, 
 	return runtime->is_key_pressed(vk_numpad) || runtime->is_key_pressed(vk_nav);
 }
 
-/// <summary>
-/// Calculates a crc32 hash from the passed in shader bytecode.
-/// </summary>
 static uint32_t calculateShaderHash(void* shaderData)
 {
 	if (nullptr == shaderData)
@@ -93,9 +97,6 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
-/// <summary>
-/// Adds a default group with VK_CAPITAL as toggle key.
-/// </summary>
 void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
@@ -103,9 +104,6 @@ void addDefaultGroup()
 	g_toggleGroups.push_back(toAdd);
 }
 
-/// <summary>
-/// Loads the defined hashes and groups from ShaderToggler.ini.
-/// </summary>
 void loadShaderTogglerIniFile()
 {
 	CDataFile iniFile;
@@ -118,7 +116,7 @@ void loadShaderTogglerIniFile()
 	if (numberOfGroups == INT_MIN)
 	{
 		addDefaultGroup();
-		g_toggleGroups[0].loadState(iniFile, -1); // old format
+		g_toggleGroups[0].loadState(iniFile, -1);
 		return;
 	}
 
@@ -129,9 +127,6 @@ void loadShaderTogglerIniFile()
 	}
 }
 
-/// <summary>
-/// Saves the currently known toggle groups with their shader hashes.
-/// </summary>
 void saveShaderTogglerIniFile()
 {
 	CDataFile iniFile;
@@ -314,10 +309,6 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 	}
 }
 
-/// <summary>
-/// Returns true if the command list specified has one or more shader hashes
-/// which are currently marked to be hidden.
-/// </summary>
 bool blockDrawCallForCommandList(command_list* commandList)
 {
 	if (nullptr == commandList)
@@ -431,63 +422,129 @@ static void onReshadePresent(effect_runtime* runtime)
 	const int NP8 = VK_NUMPAD8, NAV8 = VK_UP;
 	const int NP9 = VK_NUMPAD9, NAV9 = VK_PRIOR;
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP1, NAV1) ||
-		(is_key_down_numpad_or_nav(runtime, NP1, NAV1) && (!s_np1Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)))
+	bool np1Down = is_key_down_numpad_or_nav(runtime, NP1, NAV1);
+	bool np1Pressed = is_key_pressed_numpad_or_nav(runtime, NP1, NAV1);
+	if (np1Pressed)
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP1 = now; s_np1Held = true;
+		s_lastNP1 = now;
+		s_np1Held = true;
 	}
-	if (!is_key_down_numpad_or_nav(runtime, NP1, NAV1)) s_np1Held = false;
+	else if (np1Down && s_np1Held &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)
+	{
+		g_pixelShaderManager.huntPreviousShader(ctrlDown);
+		s_lastNP1 = now;
+	}
+	else if (!np1Down)
+	{
+		s_np1Held = false;
+	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP2, NAV2) ||
-		(is_key_down_numpad_or_nav(runtime, NP2, NAV2) && (!s_np2Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)))
+	bool np2Down = is_key_down_numpad_or_nav(runtime, NP2, NAV2);
+	bool np2Pressed = is_key_pressed_numpad_or_nav(runtime, NP2, NAV2);
+	if (np2Pressed)
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
-		s_lastNP2 = now; s_np2Held = true;
+		s_lastNP2 = now;
+		s_np2Held = true;
 	}
-	if (!is_key_down_numpad_or_nav(runtime, NP2, NAV2)) s_np2Held = false;
+	else if (np2Down && s_np2Held &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)
+	{
+		g_pixelShaderManager.huntNextShader(ctrlDown);
+		s_lastNP2 = now;
+	}
+	else if (!np2Down)
+	{
+		s_np2Held = false;
+	}
 
 	if (is_key_pressed_numpad_or_nav(runtime, NP3, NAV3))
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP4, NAV4) ||
-		(is_key_down_numpad_or_nav(runtime, NP4, NAV4) && (!s_np4Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)))
+	bool np4Down = is_key_down_numpad_or_nav(runtime, NP4, NAV4);
+	bool np4Pressed = is_key_pressed_numpad_or_nav(runtime, NP4, NAV4);
+	if (np4Pressed)
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP4 = now; s_np4Held = true;
+		s_lastNP4 = now;
+		s_np4Held = true;
 	}
-	if (!is_key_down_numpad_or_nav(runtime, NP4, NAV4)) s_np4Held = false;
+	else if (np4Down && s_np4Held &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)
+	{
+		g_vertexShaderManager.huntPreviousShader(ctrlDown);
+		s_lastNP4 = now;
+	}
+	else if (!np4Down)
+	{
+		s_np4Held = false;
+	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP5, NAV5) ||
-		(is_key_down_numpad_or_nav(runtime, NP5, NAV5) && (!s_np5Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)))
+	bool np5Down = is_key_down_numpad_or_nav(runtime, NP5, NAV5);
+	bool np5Pressed = is_key_pressed_numpad_or_nav(runtime, NP5, NAV5);
+	if (np5Pressed)
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
-		s_lastNP5 = now; s_np5Held = true;
+		s_lastNP5 = now;
+		s_np5Held = true;
 	}
-	if (!is_key_down_numpad_or_nav(runtime, NP5, NAV5)) s_np5Held = false;
+	else if (np5Down && s_np5Held &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)
+	{
+		g_vertexShaderManager.huntNextShader(ctrlDown);
+		s_lastNP5 = now;
+	}
+	else if (!np5Down)
+	{
+		s_np5Held = false;
+	}
 
 	if (is_key_pressed_numpad_or_nav(runtime, NP6, NAV6))
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP7, NAV7) ||
-		(is_key_down_numpad_or_nav(runtime, NP7, NAV7) && (!s_np7Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)))
+	bool np7Down = is_key_down_numpad_or_nav(runtime, NP7, NAV7);
+	bool np7Pressed = is_key_pressed_numpad_or_nav(runtime, NP7, NAV7);
+	if (np7Pressed)
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
-		s_lastNP7 = now; s_np7Held = true;
+		s_lastNP7 = now;
+		s_np7Held = true;
 	}
-	if (!is_key_down_numpad_or_nav(runtime, NP7, NAV7)) s_np7Held = false;
+	else if (np7Down && s_np7Held &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)
+	{
+		g_computeShaderManager.huntPreviousShader(ctrlDown);
+		s_lastNP7 = now;
+	}
+	else if (!np7Down)
+	{
+		s_np7Held = false;
+	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP8, NAV8) ||
-		(is_key_down_numpad_or_nav(runtime, NP8, NAV8) && (!s_np8Held || std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)))
+	bool np8Down = is_key_down_numpad_or_nav(runtime, NP8, NAV8);
+	bool np8Pressed = is_key_pressed_numpad_or_nav(runtime, NP8, NAV8);
+	if (np8Pressed)
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
-		s_lastNP8 = now; s_np8Held = true;
+		s_lastNP8 = now;
+		s_np8Held = true;
 	}
-	if (!is_key_down_numpad_or_nav(runtime, NP8, NAV8)) s_np8Held = false;
+	else if (np8Down && s_np8Held &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)
+	{
+		g_computeShaderManager.huntNextShader(ctrlDown);
+		s_lastNP8 = now;
+	}
+	else if (!np8Down)
+	{
+		s_np8Held = false;
+	}
 
 	if (is_key_pressed_numpad_or_nav(runtime, NP9, NAV9))
 	{
@@ -634,8 +691,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			if (ImGui::Button("Duplicate"))
 			{
-			g_toggleGroups.push_back(group.makeDuplicate());
-			saveShaderTogglerIniFile();
+				g_toggleGroups.push_back(group.makeDuplicate());
+				saveShaderTogglerIniFile();
 			}
 
 			ImGui::SameLine();

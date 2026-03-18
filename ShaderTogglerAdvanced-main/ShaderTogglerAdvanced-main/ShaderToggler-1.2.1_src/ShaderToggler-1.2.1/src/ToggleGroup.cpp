@@ -34,221 +34,100 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
-
-#include "stdafx.h"
 #include "ToggleGroup.h"
-#include "KeyData.h"
+#include "CDataFile.h"
+#include <sstream>
 
-namespace ShaderToggler
+namespace ShaderToggler {
+
+static ToggleGroup::GroupId s_nextGroupId = 1;
+
+ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
+    : m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false)
 {
-	ToggleGroup::ToggleGroup(std::string name, int id): _id(id), _isActive(false), _isEditing(false), _isActiveAtStartup(false)
-	{
-		_name = name.size() > 0 ? name : "Default";
-	}
-
-
-	int ToggleGroup::getNewGroupId()
-	{
-		static atomic_int s_groupId = 0;
-
-		++s_groupId;
-		return s_groupId;
-	}
-
-
-	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
-	{
-		_keyData.setKey(newKeyValue, shiftRequired, altRequired, ctrlRequired);
-	}
-
-
-	void ToggleGroup::setToggleKey(KeyData newData)
-	{
-		if(newData.isValid())
-		{
-			_keyData = newData;
-		}
-	}
-
-
-	void ToggleGroup::storeCollectedHashes(const std::unordered_set<uint32_t> pixelShaderHashes, const std::unordered_set<uint32_t> vertexShaderHashes, const std::unordered_set<uint32_t> computeShaderHashes)
-	{
-		clearHashes();
-
-		for(const auto hash : vertexShaderHashes)
-		{
-			_vertexShaderHashes.emplace(hash);
-		}
-		for(const auto hash : pixelShaderHashes)
-		{
-			_pixelShaderHashes.emplace(hash);
-		}
-		for(const auto hash : computeShaderHashes)
-		{
-			_computeShaderHashes.emplace(hash);
-		}
-	}
-
-
-	bool ToggleGroup::isBlockedPixelShader(uint32_t shaderHash)
-	{
-		return _isActive && (_pixelShaderHashes.count(shaderHash)==1);
-	}
-
-
-	bool ToggleGroup::isBlockedVertexShader(uint32_t shaderHash)
-	{
-		return _isActive && (_vertexShaderHashes.count(shaderHash) == 1);
-	}
-
-
-	bool ToggleGroup::isBlockedComputeShader(uint32_t shaderHash)
-	{
-		return _isActive && (_computeShaderHashes.count(shaderHash) == 1);
-	}
-
-
-	void ToggleGroup::clearHashes()
-	{
-		_pixelShaderHashes.clear();
-		_vertexShaderHashes.clear();
-		_computeShaderHashes.clear();
-	}
-
-
-	void ToggleGroup::setName(std::string newName)
-	{
-		if(newName.size()<=0)
-		{
-			return;
-		}
-		_name = newName;
-	}
-
-
-	void ToggleGroup::saveState(CDataFile& iniFile, int groupCounter) const
-	{
-		const std::string sectionRoot = "Group" + std::to_string(groupCounter);
-		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
-		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
-		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
-
-		int counter = 0;
-		for(const auto hash: _vertexShaderHashes)
-		{
-			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", vertexHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", vertexHashesCategory);
-
-		counter=0;
-		for(const auto hash: _pixelShaderHashes)
-		{
-			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", pixelHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", pixelHashesCategory);
-
-		counter = 0;
-		for(const auto hash : _computeShaderHashes)
-		{
-			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", computeHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
-
-		iniFile.SetValue("Name", _name, "", sectionRoot);
-		iniFile.SetUInt("ToggleKey", _keyData.getKeyForIniFile(), "", sectionRoot);
-		iniFile.SetBool("IsActiveAtStartup", _isActiveAtStartup, "", sectionRoot);
-	}
-
-
-	void ToggleGroup::loadState(CDataFile& iniFile, int groupCounter)
-	{
-		if(groupCounter<0)
-		{
-			int amount = iniFile.GetInt("AmountHashes", "PixelShaders");
-			for(int i = 0;i< amount;i++)
-			{
-				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "PixelShaders");
-				if(hash!=UINT_MAX)
-				{
-					_pixelShaderHashes.emplace(hash);
-				}
-			}
-			amount = iniFile.GetInt("AmountHashes", "VertexShaders");
-			for(int i = 0;i< amount;i++)
-			{
-				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "VertexShaders");
-				if(hash!=UINT_MAX)
-				{
-					_vertexShaderHashes.emplace(hash);
-				}
-			}
-			amount = iniFile.GetInt("AmountHashes", "ComputeShaders");
-			for(int i = 0; i < amount; i++)
-			{
-				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), "ComputeShaders");
-				if(hash != UINT_MAX)
-				{
-					_computeShaderHashes.emplace(hash);
-				}
-			}
-
-			// done
-			return;
-		}
-
-		const std::string sectionRoot = "Group" + std::to_string(groupCounter);
-		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
-		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
-		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
-
-		int amountShaders = iniFile.GetInt("AmountHashes", vertexHashesCategory);
-		for(int i = 0;i< amountShaders;i++)
-		{
-			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), vertexHashesCategory);
-			if(hash!=UINT_MAX)
-			{
-				_vertexShaderHashes.emplace(hash);
-			}
-		}
-
-		amountShaders = iniFile.GetInt("AmountHashes", pixelHashesCategory);
-		for(int i = 0;i< amountShaders;i++)
-		{
-			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), pixelHashesCategory);
-			if(hash!=UINT_MAX)
-			{
-				_pixelShaderHashes.emplace(hash);
-			}
-		}
-
-		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
-		for(int i = 0; i < amountShaders; i++)
-		{
-			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
-			if(hash != UINT_MAX)
-			{
-				_computeShaderHashes.emplace(hash);
-			}
-		}
-
-		_name = iniFile.GetValue("Name", sectionRoot);
-		if(_name.size()<=0)
-		{
-			_name = "Default";
-		}
-		const uint32_t toggleKeyValue = iniFile.GetUInt("ToggleKey", sectionRoot);
-		if(toggleKeyValue == UINT_MAX)
-		{
-			_keyData.setKey(VK_CAPITAL, false, false, false);
-		}
-		else
-		{
-			_keyData.setKeyFromIniFile(toggleKeyValue);
-		}
-		_isActiveAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
-		_isActive = _isActiveAtStartup;
-	}
 }
+
+ToggleGroup::ToggleGroup(const ToggleGroup& other)
+    : m_id(getNewGroupId()), // new unique ID for duplicate
+      m_name(other.m_name + " Copy"),
+      m_active(other.m_active),
+      m_activeAtStartup(other.m_activeAtStartup),
+      m_editing(false),
+      m_toggleKey(other.m_toggleKey),
+      m_pixelShaderHashes(other.m_pixelShaderHashes),
+      m_vertexShaderHashes(other.m_vertexShaderHashes),
+      m_computeShaderHashes(other.m_computeShaderHashes)
+{
+}
+
+ToggleGroup::GroupId ToggleGroup::getNewGroupId() {
+    return s_nextGroupId++;
+}
+
+ToggleGroup::GroupId ToggleGroup::getId() const { return m_id; }
+void ToggleGroup::setId(GroupId id) { m_id = id; }
+
+const std::string& ToggleGroup::getName() const { return m_name; }
+void ToggleGroup::setName(const std::string& name) { m_name = name; }
+
+bool ToggleGroup::isActive() const { return m_active; }
+void ToggleGroup::setActive(bool active) { m_active = active; }
+
+bool ToggleGroup::isActiveAtStartup() const { return m_activeAtStartup; }
+void ToggleGroup::setIsActiveAtStartup(bool startup) { m_activeAtStartup = startup; }
+
+bool ToggleGroup::isEditing() const { return m_editing; }
+void ToggleGroup::setEditing(bool editing) { m_editing = editing; }
+
+void ToggleGroup::setToggleKey(const KeyData& key) { m_toggleKey = key; }
+const KeyData& ToggleGroup::getToggleKey() const { return m_toggleKey; }
+
+std::string ToggleGroup::getToggleKeyAsString() const { return m_toggleKey.toString(); }
+
+void ToggleGroup::clearHashes() {
+    m_pixelShaderHashes.clear();
+    m_vertexShaderHashes.clear();
+    m_computeShaderHashes.clear();
+}
+
+void ToggleGroup::storeCollectedHashes(const std::vector<uint32_t>& pixel, const std::vector<uint32_t>& vertex, const std::vector<uint32_t>& compute) {
+    m_pixelShaderHashes = pixel;
+    m_vertexShaderHashes = vertex;
+    m_computeShaderHashes = compute;
+}
+
+const std::vector<uint32_t>& ToggleGroup::getPixelShaderHashes() const { return m_pixelShaderHashes; }
+const std::vector<uint32_t>& ToggleGroup::getVertexShaderHashes() const { return m_vertexShaderHashes; }
+const std::vector<uint32_t>& ToggleGroup::getComputeShaderHashes() const { return m_computeShaderHashes; }
+
+void ToggleGroup::loadState(CDataFile& iniFile, int index)
+{
+    std::stringstream ss;
+    ss << "Group" << index;
+
+    m_name = iniFile.GetString("Name", ss.str());
+    m_activeAtStartup = iniFile.GetBool("ActiveAtStartup", ss.str());
+    uint32_t key = iniFile.GetInt("ToggleKey", ss.str());
+    m_toggleKey = KeyData::fromInt(key);
+
+    // Load shader hashes
+    m_pixelShaderHashes = iniFile.GetArray("PixelShaderHashes", ss.str());
+    m_vertexShaderHashes = iniFile.GetArray("VertexShaderHashes", ss.str());
+    m_computeShaderHashes = iniFile.GetArray("ComputeShaderHashes", ss.str());
+}
+
+void ToggleGroup::saveState(CDataFile& iniFile, int index) const
+{
+    std::stringstream ss;
+    ss << "Group" << index;
+
+    iniFile.SetString("Name", m_name, ss.str());
+    iniFile.SetBool("ActiveAtStartup", m_activeAtStartup, ss.str());
+    iniFile.SetInt("ToggleKey", m_toggleKey.toInt(), ss.str());
+
+    iniFile.SetArray("PixelShaderHashes", m_pixelShaderHashes, ss.str());
+    iniFile.SetArray("VertexShaderHashes", m_vertexShaderHashes, ss.str());
+    iniFile.SetArray("ComputeShaderHashes", m_computeShaderHashes, ss.str());
+}
+
+} // namespace ShaderToggler

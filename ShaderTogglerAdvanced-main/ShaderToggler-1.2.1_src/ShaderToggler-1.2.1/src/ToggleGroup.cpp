@@ -20,19 +20,6 @@ namespace ShaderToggler
 	{
 	}
 
-	ToggleGroup::ToggleGroup(const ToggleGroup& other)
-		: m_id(getNewGroupId()),
-		  m_name(other.m_name + " Copy"),
-		  m_active(other.m_active),
-		  m_activeAtStartup(other.m_activeAtStartup),
-		  m_editing(false),
-		  m_toggleKey(other.m_toggleKey),
-		  m_pixelShaderHashes(other.m_pixelShaderHashes),
-		  m_vertexShaderHashes(other.m_vertexShaderHashes),
-		  m_computeShaderHashes(other.m_computeShaderHashes)
-	{
-	}
-
 	ToggleGroup::GroupId ToggleGroup::getNewGroupId()
 	{
 		return s_nextGroupId++;
@@ -93,6 +80,16 @@ namespace ShaderToggler
 	const std::unordered_set<uint32_t>& ToggleGroup::getPixelShaderHashes() const { return m_pixelShaderHashes; }
 	const std::unordered_set<uint32_t>& ToggleGroup::getVertexShaderHashes() const { return m_vertexShaderHashes; }
 	const std::unordered_set<uint32_t>& ToggleGroup::getComputeShaderHashes() const { return m_computeShaderHashes; }
+
+	ToggleGroup ToggleGroup::makeDuplicate() const
+	{
+		ToggleGroup copy(*this); // normal copy
+		copy.m_id = getNewGroupId();
+		copy.m_name += " Copy";
+		copy.m_active = false;
+		copy.m_editing = false;
+		return copy;
+	}
 
 	void ToggleGroup::loadState(CDataFile& iniFile, int index)
 	{

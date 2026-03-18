@@ -14,7 +14,7 @@ namespace ShaderToggler
 		using GroupId = int;
 
 		ToggleGroup(const std::string& name, GroupId id);
-		ToggleGroup(const ToggleGroup& other);
+		ToggleGroup(const ToggleGroup& other) = default;
 
 		static GroupId getNewGroupId();
 
@@ -50,6 +50,9 @@ namespace ShaderToggler
 
 		void loadState(class CDataFile& iniFile, int index);
 		void saveState(class CDataFile& iniFile, int index) const;
+
+		// intentional duplicate helper
+		ToggleGroup makeDuplicate() const;
 
 	private:
 		GroupId m_id;

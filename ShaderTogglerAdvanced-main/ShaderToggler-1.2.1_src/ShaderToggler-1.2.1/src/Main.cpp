@@ -634,8 +634,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			if (ImGui::Button("Duplicate"))
 			{
-				g_toggleGroups.push_back(ToggleGroup(group));
-				saveShaderTogglerIniFile();
+			g_toggleGroups.push_back(group.makeDuplicate());
+			saveShaderTogglerIniFile();
 			}
 
 			ImGui::SameLine();

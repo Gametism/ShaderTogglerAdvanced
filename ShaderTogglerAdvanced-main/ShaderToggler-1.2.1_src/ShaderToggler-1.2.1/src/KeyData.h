@@ -18,7 +18,12 @@ namespace ShaderToggler
 
 		bool isKeyDown(const reshade::api::effect_runtime* runtime)
 		{
-			if (!_keyCode) return false;
+			if (!_keyCode)
+				return false;
+
+			if (isGamepadCode(_keyCode))
+				return isGamepadButtonDown(_keyCode);
+
 			const bool altPressed = runtime->is_key_down(VK_MENU);
 			const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
 			const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
@@ -43,6 +48,10 @@ namespace ShaderToggler
 	private:
 		static std::string vkCodeToString(uint8_t vkCode);
 		void setKeyAsString();
+
+		static bool isGamepadCode(uint8_t code);
+		static bool isGamepadButtonDown(uint8_t code);
+		static bool isGamepadButtonPressed(uint8_t code);
 
 		uint8_t _keyCode;
 		bool _shiftRequired;

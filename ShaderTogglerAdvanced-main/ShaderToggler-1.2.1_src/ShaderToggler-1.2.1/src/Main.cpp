@@ -34,6 +34,7 @@
 #include <fstream>
 #include <cstring>
 #include <cstdio>
+#include <unordered_map>
 
 #ifdef min
 #undef min
@@ -71,6 +72,11 @@ static std::atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
+
+// Per-group hotkey edge/debounce state
+static std::unordered_map<int, bool> g_groupHotkeyWasDown;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
+static const int g_groupHotkeyDebounceMs = 150;
 
 // Hold-to-cycle state
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
@@ -542,11 +548,21 @@ static void onReshadePresent(effect_runtime* runtime)
 		--g_activeCollectorFrameCounter;
 	}
 
+	// Stable per-group toggle handling using rising edge + debounce
 	for (auto& group : g_toggleGroups)
 	{
-		if (group.getToggleKey().isKeyPressed(runtime))
+		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
+		bool& wasDownLastFrame = g_groupHotkeyWasDown[group.getId()];
+		auto& lastToggleTime = g_groupHotkeyLastToggleTime[group.getId()];
+
+		const auto nowTime = std::chrono::steady_clock::now();
+		const auto msSinceLastToggle =
+			std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - lastToggleTime).count();
+
+		if (isDownNow && !wasDownLastFrame && msSinceLastToggle > g_groupHotkeyDebounceMs)
 		{
 			group.setActive(!group.isActive());
+			lastToggleTime = nowTime;
 
 			if (group.getId() == g_toggleGroupIdShaderEditing)
 			{
@@ -555,6 +571,8 @@ static void onReshadePresent(effect_runtime* runtime)
 				g_computeShaderManager.toggleHideMarkedShaders();
 			}
 		}
+
+		wasDownLastFrame = isDownNow;
 	}
 
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
@@ -960,6 +978,12 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						return std::find(idsToRemove.begin(), idsToRemove.end(), g.getId()) != idsToRemove.end();
 					}),
 				g_toggleGroups.end());
+
+			for (int id : idsToRemove)
+			{
+				g_groupHotkeyWasDown.erase(id);
+				g_groupHotkeyLastToggleTime.erase(id);
+			}
 
 			saveShaderTogglerIniFile();
 		}

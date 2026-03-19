@@ -1,7 +1,7 @@
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
-// which allows you to define groups of shaders to toggle them on/off 
+// which allows you to define groups of shaders to toggle them on/off
 // with one key press.
 //
 /////////////////////////////////////////////////////////////////////////
@@ -15,7 +15,7 @@ namespace ShaderToggler
 {
 	namespace
 	{
-		// Custom codes stored in the normal 8-bit key slot, chosen from a high unused range
+		// Custom codes stored in the normal 8-bit key slot
 		constexpr uint8_t GPAD_A          = 240;
 		constexpr uint8_t GPAD_B          = 241;
 		constexpr uint8_t GPAD_X          = 242;
@@ -30,33 +30,38 @@ namespace ShaderToggler
 		constexpr uint8_t GPAD_DPAD_DOWN  = 251;
 		constexpr uint8_t GPAD_DPAD_LEFT  = 252;
 		constexpr uint8_t GPAD_DPAD_RIGHT = 253;
+		constexpr uint8_t GPAD_LT         = 254;
+		constexpr uint8_t GPAD_RT         = 255;
 
-		static bool pollGamepadButtons(WORD& previousButtons, WORD& currentButtons)
+		// Trigger threshold
+		constexpr BYTE GPAD_TRIGGER_THRESHOLD = 30;
+
+		static bool pollGamepadState(XINPUT_STATE& previousState, XINPUT_STATE& currentState)
 		{
 			static DWORD s_lastPollTick = 0;
-			static WORD s_prevButtons = 0;
-			static WORD s_currButtons = 0;
+			static XINPUT_STATE s_prevState = {};
+			static XINPUT_STATE s_currState = {};
 
 			const DWORD nowTick = GetTickCount();
 			if (nowTick != s_lastPollTick)
 			{
-				s_prevButtons = s_currButtons;
+				s_prevState = s_currState;
 
 				XINPUT_STATE state = {};
 				if (XInputGetState(0, &state) == ERROR_SUCCESS)
 				{
-					s_currButtons = state.Gamepad.wButtons;
+					s_currState = state;
 				}
 				else
 				{
-					s_currButtons = 0;
+					ZeroMemory(&s_currState, sizeof(s_currState));
 				}
 
 				s_lastPollTick = nowTick;
 			}
 
-			previousButtons = s_prevButtons;
-			currentButtons = s_currButtons;
+			previousState = s_prevState;
+			currentState = s_currState;
 			return true;
 		}
 
@@ -137,38 +142,59 @@ namespace ShaderToggler
 
 	bool KeyData::isGamepadCode(uint8_t code)
 	{
-		return code >= GPAD_A && code <= GPAD_DPAD_RIGHT;
+		return code >= GPAD_A;
 	}
 
 	bool KeyData::isGamepadButtonDown(uint8_t code)
 	{
+		XINPUT_STATE prevState = {};
+		XINPUT_STATE currState = {};
+		pollGamepadState(prevState, currState);
+
+		if (code == GPAD_LT)
+			return currState.Gamepad.bLeftTrigger > GPAD_TRIGGER_THRESHOLD;
+
+		if (code == GPAD_RT)
+			return currState.Gamepad.bRightTrigger > GPAD_TRIGGER_THRESHOLD;
+
 		const WORD mask = gamepadCodeToButtonMask(code);
 		if (mask == 0)
 			return false;
 
-		WORD prevButtons = 0;
-		WORD currButtons = 0;
-		pollGamepadButtons(prevButtons, currButtons);
-		return (currButtons & mask) != 0;
+		return (currState.Gamepad.wButtons & mask) != 0;
 	}
 
 	bool KeyData::isGamepadButtonPressed(uint8_t code)
 	{
+		XINPUT_STATE prevState = {};
+		XINPUT_STATE currState = {};
+		pollGamepadState(prevState, currState);
+
+		if (code == GPAD_LT)
+		{
+			return currState.Gamepad.bLeftTrigger > GPAD_TRIGGER_THRESHOLD &&
+				   prevState.Gamepad.bLeftTrigger <= GPAD_TRIGGER_THRESHOLD;
+		}
+
+		if (code == GPAD_RT)
+		{
+			return currState.Gamepad.bRightTrigger > GPAD_TRIGGER_THRESHOLD &&
+				   prevState.Gamepad.bRightTrigger <= GPAD_TRIGGER_THRESHOLD;
+		}
+
 		const WORD mask = gamepadCodeToButtonMask(code);
 		if (mask == 0)
 			return false;
 
-		WORD prevButtons = 0;
-		WORD currButtons = 0;
-		pollGamepadButtons(prevButtons, currButtons);
-
-		return ((currButtons & mask) != 0) && ((prevButtons & mask) == 0);
+		return ((currState.Gamepad.wButtons & mask) != 0) &&
+			   ((prevState.Gamepad.wButtons & mask) == 0);
 	}
 
 	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime)
 	{
 		// Keyboard + mouse
-		for (int i = 1; i < 256; i++)
+		// IMPORTANT: Skip Left Mouse so UI buttons like "OK" can still be clicked while binding.
+		for (int i = 2; i < 256; i++)
 		{
 			switch (i)
 			{
@@ -196,7 +222,8 @@ namespace ShaderToggler
 			GPAD_LB, GPAD_RB,
 			GPAD_BACK, GPAD_START,
 			GPAD_LS, GPAD_RS,
-			GPAD_DPAD_UP, GPAD_DPAD_DOWN, GPAD_DPAD_LEFT, GPAD_DPAD_RIGHT
+			GPAD_DPAD_UP, GPAD_DPAD_DOWN, GPAD_DPAD_LEFT, GPAD_DPAD_RIGHT,
+			GPAD_LT, GPAD_RT
 		};
 
 		for (uint8_t code : gamepadCandidates)
@@ -256,6 +283,8 @@ namespace ShaderToggler
 		case GPAD_DPAD_DOWN:  return "Gamepad D-Pad Down";
 		case GPAD_DPAD_LEFT:  return "Gamepad D-Pad Left";
 		case GPAD_DPAD_RIGHT: return "Gamepad D-Pad Right";
+		case GPAD_LT:         return "Gamepad LT";
+		case GPAD_RT:         return "Gamepad RT";
 		default:
 			break;
 		}
@@ -292,7 +321,7 @@ namespace ShaderToggler
 
 		_keyAsString.clear();
 
-		// Do not prefix gamepad buttons with keyboard modifiers
+		// Gamepad buttons do not use keyboard modifiers
 		if (!isGamepadCode(_keyCode))
 		{
 			if (_altRequired)   _keyAsString.append("Alt + ");

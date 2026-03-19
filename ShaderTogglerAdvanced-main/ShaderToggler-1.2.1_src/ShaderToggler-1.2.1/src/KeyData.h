@@ -16,7 +16,7 @@ namespace ShaderToggler
 		void clear();
 		void collectKeysPressed(const reshade::api::effect_runtime* runtime);
 
-		bool isKeyDown(const reshade::api::effect_runtime* runtime)
+		bool isKeyDown(const reshade::api::effect_runtime* runtime) const
 		{
 			if (!_keyCode)
 				return false;

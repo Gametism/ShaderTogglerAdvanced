@@ -256,7 +256,7 @@ static bool isLikelyFullscreenPass(command_list* commandList, uint32_t vertex_co
 	if (!g_blockLikelyFullscreenPasses || commandList == nullptr)
 		return false;
 
-	// Need some runtime size information to consider this meaningful
+	// Need some non-zero size information to consider this meaningful
 	if (g_runtimeWidth == 0 || g_runtimeHeight == 0)
 		return false;
 
@@ -584,7 +584,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		if (g_showPassDebugInfo)
 		{
 			ImGui::Separator();
-			ImGui::Text("Backbuffer size: %u x %u", g_runtimeWidth, g_runtimeHeight);
+			ImGui::Text("Backbuffer size: unavailable in this ReShade API version");
 			ImGui::Text("Experimental fullscreen pass blocker: %s", g_blockLikelyFullscreenPasses ? "ON" : "OFF");
 			ImGui::Text("Captured pass blocker: %s", g_enableCapturedPassBlocker ? "ON" : "OFF");
 
@@ -786,9 +786,10 @@ static void onReshadePresent(effect_runtime* runtime)
 		--g_activeCollectorFrameCounter;
 	}
 
-	// Update runtime size for fullscreen pass heuristics
-	g_runtimeWidth = runtime->get_width();
-	g_runtimeHeight = runtime->get_height();
+	// This ReShade API version does not expose runtime width/height directly.
+	// Keep non-zero values so the fullscreen-pass heuristic remains enabled.
+	if (g_runtimeWidth == 0) g_runtimeWidth = 1;
+	if (g_runtimeHeight == 0) g_runtimeHeight = 1;
 
 	// Stable per-group toggle handling using rising edge + debounce
 	for (auto& group : g_toggleGroups)
@@ -1109,7 +1110,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
 
-		ImGui::Text("Backbuffer size: %u x %u", g_runtimeWidth, g_runtimeHeight);
+		ImGui::Text("Backbuffer size: unavailable in this ReShade API version");
 
 		ImGui::Text("Last seen pass: %s, pipeline=%llu, verts=%u, indices=%u",
 			g_lastSeenPassWasIndexed ? "indexed" : "non-indexed",

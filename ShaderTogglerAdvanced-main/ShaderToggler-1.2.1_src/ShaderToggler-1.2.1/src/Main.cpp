@@ -35,6 +35,7 @@
 #include <cstring>
 #include <cstdio>
 #include <unordered_map>
+#include <cmath>
 
 #ifdef min
 #undef min
@@ -59,6 +60,27 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	uint32_t lastVertexCount;
 	uint32_t lastIndexCount;
 	bool lastDrawIndexed;
+
+	uint64_t currentRenderTargetView;
+	bool hasViewport;
+	float viewportX;
+	float viewportY;
+	float viewportWidth;
+	float viewportHeight;
+};
+
+struct PassSignature
+{
+	uint64_t pixelPipeline = 0;
+	uint64_t renderTargetView = 0;
+	bool hasViewport = false;
+	float viewportX = 0.0f;
+	float viewportY = 0.0f;
+	float viewportWidth = 0.0f;
+	float viewportHeight = 0.0f;
+	uint32_t vertices = 0;
+	uint32_t indices = 0;
+	bool indexed = false;
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
@@ -108,25 +130,23 @@ static bool g_showPassDebugInfo = true;
 static uint32_t g_runtimeWidth = 0;
 static uint32_t g_runtimeHeight = 0;
 
-// Last blocked pass info
-static uint64_t g_lastBlockedPassPixelPipeline = 0;
-static uint32_t g_lastBlockedPassVertices = 0;
-static uint32_t g_lastBlockedPassIndices = 0;
-static bool g_lastBlockedPassWasIndexed = false;
+// New viewport / RT / corner UI controls
+static bool g_matchCapturedPassViewport = true;
+static bool g_matchCapturedPassRenderTarget = true;
+static bool g_blockLikelyCornerUiPasses = false;
+static float g_cornerUiMaxAreaRatio = 0.20f;
+static float g_cornerUiMaxWidthRatio = 0.55f;
+static float g_cornerUiMaxHeightRatio = 0.55f;
+static float g_cornerUiEdgeToleranceRatio = 0.08f;
+static float g_seenMaxViewportWidth = 0.0f;
+static float g_seenMaxViewportHeight = 0.0f;
 
-// Last seen pass info
-static uint64_t g_lastSeenPassPixelPipeline = 0;
-static uint32_t g_lastSeenPassVertices = 0;
-static uint32_t g_lastSeenPassIndices = 0;
-static bool g_lastSeenPassWasIndexed = false;
-
-// Captured pass blocker
+// Last blocked / seen / captured pass info
+static PassSignature g_lastBlockedPass;
+static PassSignature g_lastSeenPass;
+static PassSignature g_capturedPass;
 static bool g_enableCapturedPassBlocker = false;
 static bool g_hasCapturedPass = false;
-static uint64_t g_capturedPassPixelPipeline = 0;
-static uint32_t g_capturedPassVertices = 0;
-static uint32_t g_capturedPassIndices = 0;
-static bool g_capturedPassWasIndexed = false;
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
@@ -158,6 +178,11 @@ static std::string toHex64(uint64_t value)
 	return std::string(buf);
 }
 
+static bool floatNearlyEqual(float a, float b, float eps = 0.5f)
+{
+	return std::fabs(a - b) <= eps;
+}
+
 static std::string buildIniSignature()
 {
 	std::string data;
@@ -180,17 +205,32 @@ static std::string buildIniSignature()
 			data += "|C=" + std::to_string(v);
 	}
 
-	// Include pass-control settings in signature too
 	data += "|BlockLikelyFullscreenPasses=" + std::to_string(g_blockLikelyFullscreenPasses ? 1 : 0);
 	data += "|FullscreenPassMaxVertices=" + std::to_string(g_fullscreenPassMaxVertices);
 	data += "|FullscreenPassMaxIndices=" + std::to_string(g_fullscreenPassMaxIndices);
 	data += "|ShowPassDebugInfo=" + std::to_string(g_showPassDebugInfo ? 1 : 0);
+
 	data += "|EnableCapturedPassBlocker=" + std::to_string(g_enableCapturedPassBlocker ? 1 : 0);
 	data += "|HasCapturedPass=" + std::to_string(g_hasCapturedPass ? 1 : 0);
-	data += "|CapturedPassPipeline=" + std::to_string(static_cast<unsigned long long>(g_capturedPassPixelPipeline));
-	data += "|CapturedPassVertices=" + std::to_string(g_capturedPassVertices);
-	data += "|CapturedPassIndices=" + std::to_string(g_capturedPassIndices);
-	data += "|CapturedPassIndexed=" + std::to_string(g_capturedPassWasIndexed ? 1 : 0);
+	data += "|MatchCapturedPassViewport=" + std::to_string(g_matchCapturedPassViewport ? 1 : 0);
+	data += "|MatchCapturedPassRenderTarget=" + std::to_string(g_matchCapturedPassRenderTarget ? 1 : 0);
+
+	data += "|CapturedPipeline=" + std::to_string(static_cast<unsigned long long>(g_capturedPass.pixelPipeline));
+	data += "|CapturedRTV=" + std::to_string(static_cast<unsigned long long>(g_capturedPass.renderTargetView));
+	data += "|CapturedHasViewport=" + std::to_string(g_capturedPass.hasViewport ? 1 : 0);
+	data += "|CapturedVPX=" + std::to_string(g_capturedPass.viewportX);
+	data += "|CapturedVPY=" + std::to_string(g_capturedPass.viewportY);
+	data += "|CapturedVPW=" + std::to_string(g_capturedPass.viewportWidth);
+	data += "|CapturedVPH=" + std::to_string(g_capturedPass.viewportHeight);
+	data += "|CapturedVertices=" + std::to_string(g_capturedPass.vertices);
+	data += "|CapturedIndices=" + std::to_string(g_capturedPass.indices);
+	data += "|CapturedIndexed=" + std::to_string(g_capturedPass.indexed ? 1 : 0);
+
+	data += "|BlockLikelyCornerUiPasses=" + std::to_string(g_blockLikelyCornerUiPasses ? 1 : 0);
+	data += "|CornerUiMaxAreaRatio=" + std::to_string(g_cornerUiMaxAreaRatio);
+	data += "|CornerUiMaxWidthRatio=" + std::to_string(g_cornerUiMaxWidthRatio);
+	data += "|CornerUiMaxHeightRatio=" + std::to_string(g_cornerUiMaxHeightRatio);
+	data += "|CornerUiEdgeToleranceRatio=" + std::to_string(g_cornerUiEdgeToleranceRatio);
 
 	return toHex64(fnv1a64(data));
 }
@@ -251,24 +291,42 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
+static PassSignature buildCurrentPassSignature(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	PassSignature sig{};
+
+	if (commandList == nullptr)
+		return sig;
+
+	const CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+
+	sig.pixelPipeline = data.activePixelShaderPipeline;
+	sig.renderTargetView = data.currentRenderTargetView;
+	sig.hasViewport = data.hasViewport;
+	sig.viewportX = data.viewportX;
+	sig.viewportY = data.viewportY;
+	sig.viewportWidth = data.viewportWidth;
+	sig.viewportHeight = data.viewportHeight;
+	sig.vertices = vertex_count;
+	sig.indices = index_count;
+	sig.indexed = indexed;
+
+	return sig;
+}
+
 static bool isLikelyFullscreenPass(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
 	if (!g_blockLikelyFullscreenPasses || commandList == nullptr)
 		return false;
 
-	// Need some non-zero size information to consider this meaningful
 	if (g_runtimeWidth == 0 || g_runtimeHeight == 0)
 		return false;
 
-	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	const CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
 
-	// Require an active pixel shader, since we're targeting fullscreen/post-process-like passes
-	if (commandListData.activePixelShaderPipeline == static_cast<uint64_t>(-1) || commandListData.activePixelShaderPipeline == 0)
+	if (data.activePixelShaderPipeline == static_cast<uint64_t>(-1) || data.activePixelShaderPipeline == 0)
 		return false;
 
-	// Heuristic:
-	// Fullscreen post-process draws are often fullscreen triangle (3 verts)
-	// or fullscreen quad (4-6 verts / a few indices).
 	if (indexed)
 	{
 		if (index_count >= 3 && index_count <= static_cast<uint32_t>(g_fullscreenPassMaxIndices))
@@ -288,41 +346,131 @@ static bool doesCapturedPassMatch(command_list* commandList, uint32_t vertex_cou
 	if (!g_enableCapturedPassBlocker || !g_hasCapturedPass || commandList == nullptr)
 		return false;
 
-	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	const PassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
 
-	if (commandListData.activePixelShaderPipeline != g_capturedPassPixelPipeline)
+	if (current.pixelPipeline != g_capturedPass.pixelPipeline)
 		return false;
 
-	if (indexed != g_capturedPassWasIndexed)
+	if (current.indexed != g_capturedPass.indexed)
 		return false;
 
-	if (indexed)
-		return index_count == g_capturedPassIndices;
+	if (current.indexed)
+	{
+		if (current.indices != g_capturedPass.indices)
+			return false;
+	}
+	else
+	{
+		if (current.vertices != g_capturedPass.vertices)
+			return false;
+	}
 
-	return vertex_count == g_capturedPassVertices;
+	if (g_matchCapturedPassRenderTarget)
+	{
+		if (current.renderTargetView != g_capturedPass.renderTargetView)
+			return false;
+	}
+
+	if (g_matchCapturedPassViewport)
+	{
+		if (current.hasViewport != g_capturedPass.hasViewport)
+			return false;
+
+		if (current.hasViewport)
+		{
+			if (!floatNearlyEqual(current.viewportX, g_capturedPass.viewportX) ||
+				!floatNearlyEqual(current.viewportY, g_capturedPass.viewportY) ||
+				!floatNearlyEqual(current.viewportWidth, g_capturedPass.viewportWidth) ||
+				!floatNearlyEqual(current.viewportHeight, g_capturedPass.viewportHeight))
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+static bool isLikelyCornerUiPass(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	if (!g_blockLikelyCornerUiPasses || commandList == nullptr)
+		return false;
+
+	const CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+
+	if (data.activePixelShaderPipeline == static_cast<uint64_t>(-1) || data.activePixelShaderPipeline == 0)
+		return false;
+
+	if (!data.hasViewport)
+		return false;
+
+	if (g_seenMaxViewportWidth <= 1.0f || g_seenMaxViewportHeight <= 1.0f)
+		return false;
+
+	const float vpX = data.viewportX;
+	const float vpY = data.viewportY;
+	const float vpW = data.viewportWidth;
+	const float vpH = data.viewportHeight;
+
+	if (vpW <= 0.0f || vpH <= 0.0f)
+		return false;
+
+	const float maxW = g_seenMaxViewportWidth;
+	const float maxH = g_seenMaxViewportHeight;
+
+	const float widthRatio = vpW / maxW;
+	const float heightRatio = vpH / maxH;
+	const float areaRatio = (vpW * vpH) / (maxW * maxH);
+
+	if (widthRatio > g_cornerUiMaxWidthRatio)
+		return false;
+	if (heightRatio > g_cornerUiMaxHeightRatio)
+		return false;
+	if (areaRatio > g_cornerUiMaxAreaRatio)
+		return false;
+
+	const float tolX = maxW * g_cornerUiEdgeToleranceRatio;
+	const float tolY = maxH * g_cornerUiEdgeToleranceRatio;
+
+	const bool nearLeft = vpX <= tolX;
+	const bool nearTop = vpY <= tolY;
+	const bool nearRight = (vpX + vpW) >= (maxW - tolX);
+	const bool nearBottom = (vpY + vpH) >= (maxH - tolY);
+
+	const bool nearCorner =
+		(nearLeft && nearTop) ||
+		(nearRight && nearTop) ||
+		(nearLeft && nearBottom) ||
+		(nearRight && nearBottom);
+
+	const bool lowComplexity =
+		(indexed && index_count <= 512) ||
+		(!indexed && vertex_count <= 512);
+
+	return nearCorner && lowComplexity;
 }
 
 static bool blockPassRuleForDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
 	if (doesCapturedPassMatch(commandList, vertex_count, index_count, indexed))
 	{
-		const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
-		g_lastBlockedPassPixelPipeline = commandListData.activePixelShaderPipeline;
-		g_lastBlockedPassVertices = vertex_count;
-		g_lastBlockedPassIndices = index_count;
-		g_lastBlockedPassWasIndexed = indexed;
+		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
 		return true;
 	}
 
-	if (!isLikelyFullscreenPass(commandList, vertex_count, index_count, indexed))
-		return false;
+	if (isLikelyCornerUiPass(commandList, vertex_count, index_count, indexed))
+	{
+		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		return true;
+	}
 
-	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
-	g_lastBlockedPassPixelPipeline = commandListData.activePixelShaderPipeline;
-	g_lastBlockedPassVertices = vertex_count;
-	g_lastBlockedPassIndices = index_count;
-	g_lastBlockedPassWasIndexed = indexed;
-	return true;
+	if (isLikelyFullscreenPass(commandList, vertex_count, index_count, indexed))
+	{
+		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		return true;
+	}
+
+	return false;
 }
 
 void addDefaultGroup()
@@ -340,18 +488,15 @@ void loadShaderTogglerIniFile()
 		return;
 	}
 
-	// Try custom format first
 	int numberOfGroups = iniFile.GetInt("GTAmountGroups", "General");
 	bool usingCustomFormat = true;
 
-	// Fall back to regular ShaderToggler format
 	if (numberOfGroups == INT_MIN)
 	{
 		numberOfGroups = iniFile.GetInt("AmountGroups", "General");
 		usingCustomFormat = false;
 	}
 
-	// Legacy pre-group format fallback
 	if (numberOfGroups == INT_MIN)
 	{
 		addDefaultGroup();
@@ -367,7 +512,6 @@ void loadShaderTogglerIniFile()
 		g_toggleGroups.back().loadState(iniFile, i, usingCustomFormat);
 	}
 
-	// Load experimental pass-control settings
 	g_blockLikelyFullscreenPasses = iniFile.GetBool("BlockLikelyFullscreenPasses", "General");
 
 	int loadedMaxVerts = iniFile.GetInt("FullscreenPassMaxVertices", "General");
@@ -390,34 +534,98 @@ void loadShaderTogglerIniFile()
 	if (!hasCapturedPassValue.empty())
 		g_hasCapturedPass = iniFile.GetBool("HasCapturedPass", "General");
 
+	const t_Str matchCapturedPassViewportValue = iniFile.GetValue("MatchCapturedPassViewport", "General");
+	if (!matchCapturedPassViewportValue.empty())
+		g_matchCapturedPassViewport = iniFile.GetBool("MatchCapturedPassViewport", "General");
+
+	const t_Str matchCapturedPassRTValue = iniFile.GetValue("MatchCapturedPassRenderTarget", "General");
+	if (!matchCapturedPassRTValue.empty())
+		g_matchCapturedPassRenderTarget = iniFile.GetBool("MatchCapturedPassRenderTarget", "General");
+
+	const t_Str blockLikelyCornerUiPassesValue = iniFile.GetValue("BlockLikelyCornerUiPasses", "General");
+	if (!blockLikelyCornerUiPassesValue.empty())
+		g_blockLikelyCornerUiPasses = iniFile.GetBool("BlockLikelyCornerUiPasses", "General");
+
+	float loadedCornerArea = iniFile.GetFloat("CornerUiMaxAreaRatio", "General");
+	if (loadedCornerArea != FLT_MIN)
+		g_cornerUiMaxAreaRatio = loadedCornerArea;
+
+	float loadedCornerWidth = iniFile.GetFloat("CornerUiMaxWidthRatio", "General");
+	if (loadedCornerWidth != FLT_MIN)
+		g_cornerUiMaxWidthRatio = loadedCornerWidth;
+
+	float loadedCornerHeight = iniFile.GetFloat("CornerUiMaxHeightRatio", "General");
+	if (loadedCornerHeight != FLT_MIN)
+		g_cornerUiMaxHeightRatio = loadedCornerHeight;
+
+	float loadedCornerEdgeTol = iniFile.GetFloat("CornerUiEdgeToleranceRatio", "General");
+	if (loadedCornerEdgeTol != FLT_MIN)
+		g_cornerUiEdgeToleranceRatio = loadedCornerEdgeTol;
+
 	uint32_t loadedCapturedVerts = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassVertices", "General"));
 	if (loadedCapturedVerts != UINT_MAX)
-		g_capturedPassVertices = loadedCapturedVerts;
+		g_capturedPass.vertices = loadedCapturedVerts;
 
 	uint32_t loadedCapturedIndices = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassIndices", "General"));
 	if (loadedCapturedIndices != UINT_MAX)
-		g_capturedPassIndices = loadedCapturedIndices;
+		g_capturedPass.indices = loadedCapturedIndices;
 
 	const t_Str capturedIndexedValue = iniFile.GetValue("CapturedPassIndexed", "General");
 	if (!capturedIndexedValue.empty())
-		g_capturedPassWasIndexed = iniFile.GetBool("CapturedPassIndexed", "General");
+		g_capturedPass.indexed = iniFile.GetBool("CapturedPassIndexed", "General");
+
+	const t_Str capturedHasViewportValue = iniFile.GetValue("CapturedPassHasViewport", "General");
+	if (!capturedHasViewportValue.empty())
+		g_capturedPass.hasViewport = iniFile.GetBool("CapturedPassHasViewport", "General");
+
+	float loadedVPX = iniFile.GetFloat("CapturedPassViewportX", "General");
+	if (loadedVPX != FLT_MIN)
+		g_capturedPass.viewportX = loadedVPX;
+
+	float loadedVPY = iniFile.GetFloat("CapturedPassViewportY", "General");
+	if (loadedVPY != FLT_MIN)
+		g_capturedPass.viewportY = loadedVPY;
+
+	float loadedVPW = iniFile.GetFloat("CapturedPassViewportW", "General");
+	if (loadedVPW != FLT_MIN)
+		g_capturedPass.viewportWidth = loadedVPW;
+
+	float loadedVPH = iniFile.GetFloat("CapturedPassViewportH", "General");
+	if (loadedVPH != FLT_MIN)
+		g_capturedPass.viewportHeight = loadedVPH;
 
 	uint32_t loadedCapturedPipelineLo = iniFile.GetUInt("CapturedPassPipelineLo", "General");
 	uint32_t loadedCapturedPipelineHi = iniFile.GetUInt("CapturedPassPipelineHi", "General");
 	if (loadedCapturedPipelineLo != UINT_MAX && loadedCapturedPipelineHi != UINT_MAX)
 	{
-		g_capturedPassPixelPipeline =
+		g_capturedPass.pixelPipeline =
 			(static_cast<uint64_t>(loadedCapturedPipelineHi) << 32) |
 			static_cast<uint64_t>(loadedCapturedPipelineLo);
 	}
 
-	// Clamp loaded values
+	uint32_t loadedCapturedRTLo = iniFile.GetUInt("CapturedPassRTVLo", "General");
+	uint32_t loadedCapturedRTHi = iniFile.GetUInt("CapturedPassRTVHi", "General");
+	if (loadedCapturedRTLo != UINT_MAX && loadedCapturedRTHi != UINT_MAX)
+	{
+		g_capturedPass.renderTargetView =
+			(static_cast<uint64_t>(loadedCapturedRTHi) << 32) |
+			static_cast<uint64_t>(loadedCapturedRTLo);
+	}
+
 	if (g_fullscreenPassMaxVertices < 3) g_fullscreenPassMaxVertices = 3;
 	if (g_fullscreenPassMaxVertices > 128) g_fullscreenPassMaxVertices = 128;
 	if (g_fullscreenPassMaxIndices < 3) g_fullscreenPassMaxIndices = 3;
 	if (g_fullscreenPassMaxIndices > 256) g_fullscreenPassMaxIndices = 256;
 
-	// Only enforce watermark/signature on custom files
+	if (g_cornerUiMaxAreaRatio < 0.01f) g_cornerUiMaxAreaRatio = 0.01f;
+	if (g_cornerUiMaxAreaRatio > 1.0f) g_cornerUiMaxAreaRatio = 1.0f;
+	if (g_cornerUiMaxWidthRatio < 0.05f) g_cornerUiMaxWidthRatio = 0.05f;
+	if (g_cornerUiMaxWidthRatio > 1.0f) g_cornerUiMaxWidthRatio = 1.0f;
+	if (g_cornerUiMaxHeightRatio < 0.05f) g_cornerUiMaxHeightRatio = 0.05f;
+	if (g_cornerUiMaxHeightRatio > 1.0f) g_cornerUiMaxHeightRatio = 1.0f;
+	if (g_cornerUiEdgeToleranceRatio < 0.0f) g_cornerUiEdgeToleranceRatio = 0.0f;
+	if (g_cornerUiEdgeToleranceRatio > 0.5f) g_cornerUiEdgeToleranceRatio = 0.5f;
+
 	if (usingCustomFormat)
 	{
 		const std::string creator = iniFile.GetValue("Creator", "General");
@@ -446,23 +654,38 @@ void saveShaderTogglerIniFile()
 {
 	CDataFile iniFile;
 
-	// Save only in custom format
 	iniFile.SetInt("GTAmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
 	iniFile.SetValue("Creator", GT_CREATOR, "", "General");
 	iniFile.SetValue(GT_CACHE_KEY, buildIniSignature(), "", "General");
 
-	// Save experimental pass-control settings
 	iniFile.SetBool("BlockLikelyFullscreenPasses", g_blockLikelyFullscreenPasses, "", "General");
 	iniFile.SetInt("FullscreenPassMaxVertices", g_fullscreenPassMaxVertices, "", "General");
 	iniFile.SetInt("FullscreenPassMaxIndices", g_fullscreenPassMaxIndices, "", "General");
 	iniFile.SetBool("ShowPassDebugInfo", g_showPassDebugInfo, "", "General");
+
 	iniFile.SetBool("EnableCapturedPassBlocker", g_enableCapturedPassBlocker, "", "General");
 	iniFile.SetBool("HasCapturedPass", g_hasCapturedPass, "", "General");
-	iniFile.SetUInt("CapturedPassVertices", g_capturedPassVertices, "", "General");
-	iniFile.SetUInt("CapturedPassIndices", g_capturedPassIndices, "", "General");
-	iniFile.SetBool("CapturedPassIndexed", g_capturedPassWasIndexed, "", "General");
-	iniFile.SetUInt("CapturedPassPipelineLo", static_cast<uint32_t>(g_capturedPassPixelPipeline & 0xFFFFFFFFull), "", "General");
-	iniFile.SetUInt("CapturedPassPipelineHi", static_cast<uint32_t>((g_capturedPassPixelPipeline >> 32) & 0xFFFFFFFFull), "", "General");
+	iniFile.SetBool("MatchCapturedPassViewport", g_matchCapturedPassViewport, "", "General");
+	iniFile.SetBool("MatchCapturedPassRenderTarget", g_matchCapturedPassRenderTarget, "", "General");
+
+	iniFile.SetUInt("CapturedPassVertices", g_capturedPass.vertices, "", "General");
+	iniFile.SetUInt("CapturedPassIndices", g_capturedPass.indices, "", "General");
+	iniFile.SetBool("CapturedPassIndexed", g_capturedPass.indexed, "", "General");
+	iniFile.SetBool("CapturedPassHasViewport", g_capturedPass.hasViewport, "", "General");
+	iniFile.SetFloat("CapturedPassViewportX", g_capturedPass.viewportX, "", "General");
+	iniFile.SetFloat("CapturedPassViewportY", g_capturedPass.viewportY, "", "General");
+	iniFile.SetFloat("CapturedPassViewportW", g_capturedPass.viewportWidth, "", "General");
+	iniFile.SetFloat("CapturedPassViewportH", g_capturedPass.viewportHeight, "", "General");
+	iniFile.SetUInt("CapturedPassPipelineLo", static_cast<uint32_t>(g_capturedPass.pixelPipeline & 0xFFFFFFFFull), "", "General");
+	iniFile.SetUInt("CapturedPassPipelineHi", static_cast<uint32_t>((g_capturedPass.pixelPipeline >> 32) & 0xFFFFFFFFull), "", "General");
+	iniFile.SetUInt("CapturedPassRTVLo", static_cast<uint32_t>(g_capturedPass.renderTargetView & 0xFFFFFFFFull), "", "General");
+	iniFile.SetUInt("CapturedPassRTVHi", static_cast<uint32_t>((g_capturedPass.renderTargetView >> 32) & 0xFFFFFFFFull), "", "General");
+
+	iniFile.SetBool("BlockLikelyCornerUiPasses", g_blockLikelyCornerUiPasses, "", "General");
+	iniFile.SetFloat("CornerUiMaxAreaRatio", g_cornerUiMaxAreaRatio, "", "General");
+	iniFile.SetFloat("CornerUiMaxWidthRatio", g_cornerUiMaxWidthRatio, "", "General");
+	iniFile.SetFloat("CornerUiMaxHeightRatio", g_cornerUiMaxHeightRatio, "", "General");
+	iniFile.SetFloat("CornerUiEdgeToleranceRatio", g_cornerUiEdgeToleranceRatio, "", "General");
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
@@ -478,6 +701,19 @@ void saveShaderTogglerIniFile()
 static void onInitCommandList(command_list *commandList)
 {
 	commandList->create_private_data<CommandListDataContainer>();
+	CommandListDataContainer &data = commandList->get_private_data<CommandListDataContainer>();
+	data.activePixelShaderPipeline = static_cast<uint64_t>(-1);
+	data.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
+	data.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
+	data.lastVertexCount = 0;
+	data.lastIndexCount = 0;
+	data.lastDrawIndexed = false;
+	data.currentRenderTargetView = 0;
+	data.hasViewport = false;
+	data.viewportX = 0.0f;
+	data.viewportY = 0.0f;
+	data.viewportWidth = 0.0f;
+	data.viewportHeight = 0.0f;
 }
 
 static void onDestroyCommandList(command_list *commandList)
@@ -487,13 +723,19 @@ static void onDestroyCommandList(command_list *commandList)
 
 static void onResetCommandList(command_list *commandList)
 {
-	CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
-	commandListData.activePixelShaderPipeline = static_cast<uint64_t>(-1);
-	commandListData.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
-	commandListData.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
-	commandListData.lastVertexCount = 0;
-	commandListData.lastIndexCount = 0;
-	commandListData.lastDrawIndexed = false;
+	CommandListDataContainer &data = commandList->get_private_data<CommandListDataContainer>();
+	data.activePixelShaderPipeline = static_cast<uint64_t>(-1);
+	data.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
+	data.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
+	data.lastVertexCount = 0;
+	data.lastIndexCount = 0;
+	data.lastDrawIndexed = false;
+	data.currentRenderTargetView = 0;
+	data.hasViewport = false;
+	data.viewportX = 0.0f;
+	data.viewportY = 0.0f;
+	data.viewportWidth = 0.0f;
+	data.viewportHeight = 0.0f;
 }
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
@@ -522,6 +764,37 @@ static void onDestroyPipeline(device *, pipeline pipelineHandle)
 	g_pixelShaderManager.removeHandle(pipelineHandle.handle);
 	g_vertexShaderManager.removeHandle(pipelineHandle.handle);
 	g_computeShaderManager.removeHandle(pipelineHandle.handle);
+}
+
+static void onBindRenderTargetsAndDepthStencil(command_list* commandList, uint32_t count, const resource_view* rtvs, resource_view)
+{
+	if (commandList == nullptr)
+		return;
+
+	CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+	data.currentRenderTargetView = (count > 0 && rtvs != nullptr) ? rtvs[0].handle : 0;
+}
+
+static void onBindViewports(command_list* commandList, uint32_t first, uint32_t count, const viewport* viewports)
+{
+	if (commandList == nullptr || viewports == nullptr || count == 0)
+		return;
+
+	if (first != 0)
+		return;
+
+	CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+
+	data.hasViewport = true;
+	data.viewportX = viewports[0].x;
+	data.viewportY = viewports[0].y;
+	data.viewportWidth = viewports[0].width;
+	data.viewportHeight = viewports[0].height;
+
+	if (data.viewportWidth > g_seenMaxViewportWidth)
+		g_seenMaxViewportWidth = data.viewportWidth;
+	if (data.viewportHeight > g_seenMaxViewportHeight)
+		g_seenMaxViewportHeight = data.viewportHeight;
 }
 
 static void displayIsPartOfToggleGroup()
@@ -553,7 +826,28 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 		shaderType, toDisplay.getPipelineCount(), shaderType, toDisplay.getShaderCount());
 }
 
-static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
+static void displayPassSignatureText(const char* label, const PassSignature& sig)
+{
+	ImGui::Text("%s: %s, pipeline=%llu, rtv=%llu, verts=%u, indices=%u",
+		label,
+		sig.indexed ? "indexed" : "non-indexed",
+		static_cast<unsigned long long>(sig.pixelPipeline),
+		static_cast<unsigned long long>(sig.renderTargetView),
+		sig.vertices,
+		sig.indices);
+
+	if (sig.hasViewport)
+	{
+		ImGui::Text("  viewport: x=%.1f y=%.1f w=%.1f h=%.1f",
+			sig.viewportX, sig.viewportY, sig.viewportWidth, sig.viewportHeight);
+	}
+	else
+	{
+		ImGui::Text("  viewport: unavailable");
+	}
+}
+
+static void onReshadeOverlay(reshade::api::effect_runtime *)
 {
 	if (g_toggleGroupIdShaderEditing >= 0)
 	{
@@ -585,26 +879,13 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		{
 			ImGui::Separator();
 			ImGui::Text("Backbuffer size: unavailable in this ReShade API version");
-			ImGui::Text("Experimental fullscreen pass blocker: %s", g_blockLikelyFullscreenPasses ? "ON" : "OFF");
+			ImGui::Text("Largest seen viewport: %.1f x %.1f", g_seenMaxViewportWidth, g_seenMaxViewportHeight);
+			ImGui::Text("Fullscreen pass blocker: %s", g_blockLikelyFullscreenPasses ? "ON" : "OFF");
 			ImGui::Text("Captured pass blocker: %s", g_enableCapturedPassBlocker ? "ON" : "OFF");
-
-			ImGui::Text("Last seen pass: %s, pipeline=%llu, verts=%u, indices=%u",
-				g_lastSeenPassWasIndexed ? "indexed" : "non-indexed",
-				static_cast<unsigned long long>(g_lastSeenPassPixelPipeline),
-				g_lastSeenPassVertices,
-				g_lastSeenPassIndices);
-
-			ImGui::Text("Captured pass: %s, pipeline=%llu, verts=%u, indices=%u",
-				g_capturedPassWasIndexed ? "indexed" : "non-indexed",
-				static_cast<unsigned long long>(g_capturedPassPixelPipeline),
-				g_capturedPassVertices,
-				g_capturedPassIndices);
-
-			ImGui::Text("Last blocked pass: %s, pipeline=%llu, verts=%u, indices=%u",
-				g_lastBlockedPassWasIndexed ? "indexed" : "non-indexed",
-				static_cast<unsigned long long>(g_lastBlockedPassPixelPipeline),
-				g_lastBlockedPassVertices,
-				g_lastBlockedPassIndices);
+			ImGui::Text("Corner/UI pass blocker: %s", g_blockLikelyCornerUiPasses ? "ON" : "OFF");
+			displayPassSignatureText("Last seen pass", g_lastSeenPass);
+			displayPassSignatureText("Captured pass", g_capturedPass);
+			displayPassSignatureText("Last blocked pass", g_lastBlockedPass);
 		}
 
 		if (g_activeCollectorFrameCounter > 0)
@@ -636,7 +917,6 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 
 		if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
 		{
-			// Still allow unknown handles to be ignored
 			return;
 		}
 
@@ -735,11 +1015,7 @@ static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t, u
 		data.lastVertexCount = vertex_count;
 		data.lastIndexCount = 0;
 		data.lastDrawIndexed = false;
-
-		g_lastSeenPassPixelPipeline = data.activePixelShaderPipeline;
-		g_lastSeenPassVertices = vertex_count;
-		g_lastSeenPassIndices = 0;
-		g_lastSeenPassWasIndexed = false;
+		g_lastSeenPass = buildCurrentPassSignature(commandList, vertex_count, 0, false);
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -754,11 +1030,7 @@ static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint3
 		data.lastVertexCount = 0;
 		data.lastIndexCount = index_count;
 		data.lastDrawIndexed = true;
-
-		g_lastSeenPassPixelPipeline = data.activePixelShaderPipeline;
-		g_lastSeenPassVertices = 0;
-		g_lastSeenPassIndices = index_count;
-		g_lastSeenPassWasIndexed = true;
+		g_lastSeenPass = buildCurrentPassSignature(commandList, 0, index_count, true);
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -786,12 +1058,9 @@ static void onReshadePresent(effect_runtime* runtime)
 		--g_activeCollectorFrameCounter;
 	}
 
-	// This ReShade API version does not expose runtime width/height directly.
-	// Keep non-zero values so the fullscreen-pass heuristic remains enabled.
 	if (g_runtimeWidth == 0) g_runtimeWidth = 1;
 	if (g_runtimeHeight == 0) g_runtimeHeight = 1;
 
-	// Stable per-group toggle handling using rising edge + debounce
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
@@ -1071,12 +1340,12 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("Render pass control (experimental)", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("Experimental render-pass control. This can block likely fullscreen post-process passes using heuristics, or block an exact captured pass signature using active pixel pipeline + draw signature.");
+		ImGui::TextUnformatted("Experimental render-pass control. This can block likely fullscreen post-process passes, exact captured passes with viewport/RT matching, and likely corner/UI passes.");
 		ImGui::PopTextWrapPos();
 
 		ImGui::Checkbox("Block likely fullscreen passes", &g_blockLikelyFullscreenPasses);
 		ImGui::SameLine();
-		showHelpMarker("Experimental. Blocks likely fullscreen post-process passes with very low vertex/index counts and an active pixel shader.");
+		showHelpMarker("Blocks likely fullscreen post-process passes with very low vertex/index counts and an active pixel shader.");
 
 		ImGui::SliderInt("Max fullscreen pass vertices", &g_fullscreenPassMaxVertices, 3, 128);
 		ImGui::SliderInt("Max fullscreen pass indices", &g_fullscreenPassMaxIndices, 3, 256);
@@ -1085,50 +1354,45 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
 		ImGui::SameLine();
-		showHelpMarker("Blocks exactly the captured pass signature: active pixel pipeline + indexed/non-indexed mode + exact vertex/index count.");
+		showHelpMarker("Blocks an exact captured pass signature.");
+
+		ImGui::Checkbox("Captured pass must match viewport", &g_matchCapturedPassViewport);
+		ImGui::Checkbox("Captured pass must match render target", &g_matchCapturedPassRenderTarget);
 
 		if (ImGui::Button("Capture last seen pass"))
 		{
-			g_hasCapturedPass = (g_lastSeenPassPixelPipeline != 0 && g_lastSeenPassPixelPipeline != static_cast<uint64_t>(-1));
-			if (g_hasCapturedPass)
+			if (g_lastSeenPass.pixelPipeline != 0 && g_lastSeenPass.pixelPipeline != static_cast<uint64_t>(-1))
 			{
-				g_capturedPassPixelPipeline = g_lastSeenPassPixelPipeline;
-				g_capturedPassVertices = g_lastSeenPassVertices;
-				g_capturedPassIndices = g_lastSeenPassIndices;
-				g_capturedPassWasIndexed = g_lastSeenPassWasIndexed;
+				g_hasCapturedPass = true;
+				g_capturedPass = g_lastSeenPass;
 			}
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Clear captured pass"))
 		{
 			g_hasCapturedPass = false;
-			g_capturedPassPixelPipeline = 0;
-			g_capturedPassVertices = 0;
-			g_capturedPassIndices = 0;
-			g_capturedPassWasIndexed = false;
+			g_capturedPass = PassSignature{};
 		}
+
+		ImGui::Separator();
+
+		ImGui::Checkbox("Block likely corner/UI passes", &g_blockLikelyCornerUiPasses);
+		ImGui::SameLine();
+		showHelpMarker("Heuristic blocker for small corner/edge viewports that look like HUD/UI passes.");
+
+		ImGui::SliderFloat("Corner/UI max area ratio", &g_cornerUiMaxAreaRatio, 0.01f, 1.0f);
+		ImGui::SliderFloat("Corner/UI max width ratio", &g_cornerUiMaxWidthRatio, 0.05f, 1.0f);
+		ImGui::SliderFloat("Corner/UI max height ratio", &g_cornerUiMaxHeightRatio, 0.05f, 1.0f);
+		ImGui::SliderFloat("Corner/UI edge tolerance", &g_cornerUiEdgeToleranceRatio, 0.0f, 0.5f);
 
 		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
 
 		ImGui::Text("Backbuffer size: unavailable in this ReShade API version");
+		ImGui::Text("Largest seen viewport: %.1f x %.1f", g_seenMaxViewportWidth, g_seenMaxViewportHeight);
 
-		ImGui::Text("Last seen pass: %s, pipeline=%llu, verts=%u, indices=%u",
-			g_lastSeenPassWasIndexed ? "indexed" : "non-indexed",
-			static_cast<unsigned long long>(g_lastSeenPassPixelPipeline),
-			g_lastSeenPassVertices,
-			g_lastSeenPassIndices);
-
-		ImGui::Text("Captured pass: %s, pipeline=%llu, verts=%u, indices=%u",
-			g_capturedPassWasIndexed ? "indexed" : "non-indexed",
-			static_cast<unsigned long long>(g_capturedPassPixelPipeline),
-			g_capturedPassVertices,
-			g_capturedPassIndices);
-
-		ImGui::Text("Last blocked pass: %s, pipeline=%llu, verts=%u, indices=%u",
-			g_lastBlockedPassWasIndexed ? "indexed" : "non-indexed",
-			static_cast<unsigned long long>(g_lastBlockedPassPixelPipeline),
-			g_lastBlockedPassVertices,
-			g_lastBlockedPassIndices);
+		displayPassSignatureText("Last seen pass", g_lastSeenPass);
+		displayPassSignatureText("Captured pass", g_capturedPass);
+		displayPassSignatureText("Last blocked pass", g_lastBlockedPass);
 
 		ImGui::Separator();
 	}
@@ -1372,9 +1636,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
 		reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
 		reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+		reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+		reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(onBindRenderTargetsAndDepthStencil);
+		reshade::register_event<reshade::addon_event::bind_viewports>(onBindViewports);
 		reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
-		reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
 		reshade::register_event<reshade::addon_event::draw>(onDraw);
 		reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
@@ -1388,8 +1654,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
-		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+		reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(onBindRenderTargetsAndDepthStencil);
+		reshade::unregister_event<reshade::addon_event::bind_viewports>(onBindViewports);
+		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::unregister_event<reshade::addon_event::draw>(onDraw);
 		reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);

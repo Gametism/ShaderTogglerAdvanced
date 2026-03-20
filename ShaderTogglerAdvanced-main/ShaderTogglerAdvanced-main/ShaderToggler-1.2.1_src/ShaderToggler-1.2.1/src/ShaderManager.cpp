@@ -9,8 +9,8 @@
 //
 // https://github.com/FransBouma/ShaderToggler
 //
-// Modifications (including active-at-startup - x86, group reordering, and UI changes)
-// (c) 2025 Sven 'Gametism' Königsmann. All rights reserved.
+// Modifications (including active-at-startup - x86, group reordering, duplication and UI changes)
+// (c) 2026 Sven 'Gametism' Königsmann. All rights reserved.
 // 
 //
 // Redistribution and use in source and binary forms, with or without

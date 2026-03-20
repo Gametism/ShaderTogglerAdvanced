@@ -1,55 +1,107 @@
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
-// which allows you to define groups of shaders to toggle them on/off 
+// which allows you to define groups of shaders to toggle them on/off
 // with one key press.
 //
-// Based on the original ShaderToggler by Frans 'Otis_Inf' Bouma.
-// (c) Frans 'Otis_Inf' Bouma. All rights reserved.
-//
-// https://github.com/FransBouma/ShaderToggler
-//
-// Modifications (including active-at-startup - x86, group reordering, and UI changes)
-// (c) 2025 Sven 'Gametism' Königsmann. All rights reserved.
-// 
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met :
-//
-//  * Redistributions of source code must retain the above copyright notices,
-//    this list of conditions, and the following disclaimer.
-//
-//  * Redistributions in binary form must reproduce the above copyright notices,
-//    this list of conditions, and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE
-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /////////////////////////////////////////////////////////////////////////
+
 #include "KeyData.h"
+#include <Xinput.h>
+
+#pragma comment(lib, "Xinput9_1_0.lib")
 
 namespace ShaderToggler
 {
-	KeyData::KeyData(): _keyCode(0), _shiftRequired(false), _altRequired(false), _ctrlRequired(false)
+	namespace
 	{
+		// Custom codes stored in the normal 8-bit key slot
+		constexpr uint8_t GPAD_A          = 240;
+		constexpr uint8_t GPAD_B          = 241;
+		constexpr uint8_t GPAD_X          = 242;
+		constexpr uint8_t GPAD_Y          = 243;
+		constexpr uint8_t GPAD_LB         = 244;
+		constexpr uint8_t GPAD_RB         = 245;
+		constexpr uint8_t GPAD_BACK       = 246;
+		constexpr uint8_t GPAD_START      = 247;
+		constexpr uint8_t GPAD_LS         = 248;
+		constexpr uint8_t GPAD_RS         = 249;
+		constexpr uint8_t GPAD_DPAD_UP    = 250;
+		constexpr uint8_t GPAD_DPAD_DOWN  = 251;
+		constexpr uint8_t GPAD_DPAD_LEFT  = 252;
+		constexpr uint8_t GPAD_DPAD_RIGHT = 253;
+		constexpr uint8_t GPAD_LT         = 254;
+		constexpr uint8_t GPAD_RT         = 255;
+
+		// Trigger threshold
+		constexpr BYTE GPAD_TRIGGER_THRESHOLD = 30;
+
+		static bool pollGamepadState(XINPUT_STATE& previousState, XINPUT_STATE& currentState)
+		{
+			static DWORD s_lastPollTick = 0;
+			static XINPUT_STATE s_prevState = {};
+			static XINPUT_STATE s_currState = {};
+
+			const DWORD nowTick = GetTickCount();
+			if (nowTick != s_lastPollTick)
+			{
+				s_prevState = s_currState;
+
+				XINPUT_STATE state = {};
+				if (XInputGetState(0, &state) == ERROR_SUCCESS)
+				{
+					s_currState = state;
+				}
+				else
+				{
+					ZeroMemory(&s_currState, sizeof(s_currState));
+				}
+
+				s_lastPollTick = nowTick;
+			}
+
+			previousState = s_prevState;
+			currentState = s_currState;
+			return true;
+		}
+
+		static WORD gamepadCodeToButtonMask(uint8_t code)
+		{
+			switch (code)
+			{
+			case GPAD_A:          return XINPUT_GAMEPAD_A;
+			case GPAD_B:          return XINPUT_GAMEPAD_B;
+			case GPAD_X:          return XINPUT_GAMEPAD_X;
+			case GPAD_Y:          return XINPUT_GAMEPAD_Y;
+			case GPAD_LB:         return XINPUT_GAMEPAD_LEFT_SHOULDER;
+			case GPAD_RB:         return XINPUT_GAMEPAD_RIGHT_SHOULDER;
+			case GPAD_BACK:       return XINPUT_GAMEPAD_BACK;
+			case GPAD_START:      return XINPUT_GAMEPAD_START;
+			case GPAD_LS:         return XINPUT_GAMEPAD_LEFT_THUMB;
+			case GPAD_RS:         return XINPUT_GAMEPAD_RIGHT_THUMB;
+			case GPAD_DPAD_UP:    return XINPUT_GAMEPAD_DPAD_UP;
+			case GPAD_DPAD_DOWN:  return XINPUT_GAMEPAD_DPAD_DOWN;
+			case GPAD_DPAD_LEFT:  return XINPUT_GAMEPAD_DPAD_LEFT;
+			case GPAD_DPAD_RIGHT: return XINPUT_GAMEPAD_DPAD_RIGHT;
+			default:              return 0;
+			}
+		}
 	}
 
+	KeyData::KeyData() : _keyCode(0), _shiftRequired(false), _altRequired(false), _ctrlRequired(false)
+	{
+		setKeyAsString();
+	}
 
 	void KeyData::setKeyFromIniFile(uint32_t newKeyValue)
 	{
-		if(newKeyValue==0)
+		if (newKeyValue == 0)
 		{
+			clear();
 			return;
 		}
-		_keyCode = ((newKeyValue >> 24) & 0xFF);;
+
+		_keyCode = static_cast<uint8_t>((newKeyValue >> 24) & 0xFF);
 		_altRequired = ((newKeyValue >> 16) & 0xFF) == 0x01;
 		_ctrlRequired = ((newKeyValue >> 8) & 0xFF) == 0x01;
 		_shiftRequired = (newKeyValue & 0xFF) == 0x01;
@@ -58,10 +110,12 @@ namespace ShaderToggler
 
 	void KeyData::setKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
-		if(newKeyValue==0)
+		if (newKeyValue == 0)
 		{
+			clear();
 			return;
 		}
+
 		_keyCode = newKeyValue;
 		_ctrlRequired = ctrlRequired;
 		_shiftRequired = shiftRequired;
@@ -69,12 +123,13 @@ namespace ShaderToggler
 		setKeyAsString();
 	}
 
-
 	uint32_t KeyData::getKeyForIniFile() const
 	{
-		return (_keyCode & 0xFF) << 24 | ((_altRequired ? 1 : 0) << 16) | ((_ctrlRequired ? 1 : 0) << 8) | ((_shiftRequired ? 1 : 0));
+		return ((_keyCode & 0xFF) << 24) |
+			   ((_altRequired ? 1u : 0u) << 16) |
+			   ((_ctrlRequired ? 1u : 0u) << 8) |
+			   (_shiftRequired ? 1u : 0u);
 	}
-
 
 	void KeyData::clear()
 	{
@@ -85,36 +140,122 @@ namespace ShaderToggler
 		setKeyAsString();
 	}
 
+	bool KeyData::isGamepadCode(uint8_t code)
+	{
+		return code >= GPAD_A;
+	}
+
+	bool KeyData::isGamepadButtonDown(uint8_t code)
+	{
+		XINPUT_STATE prevState = {};
+		XINPUT_STATE currState = {};
+		pollGamepadState(prevState, currState);
+
+		if (code == GPAD_LT)
+			return currState.Gamepad.bLeftTrigger > GPAD_TRIGGER_THRESHOLD;
+
+		if (code == GPAD_RT)
+			return currState.Gamepad.bRightTrigger > GPAD_TRIGGER_THRESHOLD;
+
+		const WORD mask = gamepadCodeToButtonMask(code);
+		if (mask == 0)
+			return false;
+
+		return (currState.Gamepad.wButtons & mask) != 0;
+	}
+
+	bool KeyData::isGamepadButtonPressed(uint8_t code)
+	{
+		XINPUT_STATE prevState = {};
+		XINPUT_STATE currState = {};
+		pollGamepadState(prevState, currState);
+
+		if (code == GPAD_LT)
+		{
+			return currState.Gamepad.bLeftTrigger > GPAD_TRIGGER_THRESHOLD &&
+				   prevState.Gamepad.bLeftTrigger <= GPAD_TRIGGER_THRESHOLD;
+		}
+
+		if (code == GPAD_RT)
+		{
+			return currState.Gamepad.bRightTrigger > GPAD_TRIGGER_THRESHOLD &&
+				   prevState.Gamepad.bRightTrigger <= GPAD_TRIGGER_THRESHOLD;
+		}
+
+		const WORD mask = gamepadCodeToButtonMask(code);
+		if (mask == 0)
+			return false;
+
+		return ((currState.Gamepad.wButtons & mask) != 0) &&
+			   ((prevState.Gamepad.wButtons & mask) == 0);
+	}
 
 	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime)
 	{
-		// keys below 7 aren't interesting.
-		for(int i=7;i<256;i++)
+		// Keyboard + mouse
+		// IMPORTANT: Skip Left Mouse so UI buttons like "OK" can still be clicked while binding.
+		for (int i = 2; i < 256; i++)
 		{
-			switch(i)
+			switch (i)
 			{
-				case VK_MENU:
-				case VK_CONTROL:
-				case VK_SHIFT:
-					break;
-				default:
-					if(runtime->is_key_down(i))
-					{
-						_keyCode = i;
-						_altRequired = runtime->is_key_down(VK_MENU);
-						_ctrlRequired = runtime->is_key_down(VK_CONTROL);
-						_shiftRequired = runtime->is_key_down(VK_SHIFT);
-					}
+			case VK_MENU:
+			case VK_CONTROL:
+			case VK_SHIFT:
+				break;
+			default:
+				if (runtime->is_key_down(i))
+				{
+					_keyCode = static_cast<uint8_t>(i);
+					_altRequired = runtime->is_key_down(VK_MENU);
+					_ctrlRequired = runtime->is_key_down(VK_CONTROL);
+					_shiftRequired = runtime->is_key_down(VK_SHIFT);
+					setKeyAsString();
+					return;
+				}
+				break;
 			}
 		}
+
+		// Gamepad (modifiers do not apply)
+		const uint8_t gamepadCandidates[] = {
+			GPAD_A, GPAD_B, GPAD_X, GPAD_Y,
+			GPAD_LB, GPAD_RB,
+			GPAD_BACK, GPAD_START,
+			GPAD_LS, GPAD_RS,
+			GPAD_DPAD_UP, GPAD_DPAD_DOWN, GPAD_DPAD_LEFT, GPAD_DPAD_RIGHT,
+			GPAD_LT, GPAD_RT
+		};
+
+		for (uint8_t code : gamepadCandidates)
+		{
+			if (isGamepadButtonDown(code))
+			{
+				_keyCode = code;
+				_altRequired = false;
+				_ctrlRequired = false;
+				_shiftRequired = false;
+				setKeyAsString();
+				return;
+			}
+		}
+
 		setKeyAsString();
 	}
 
-
-	bool KeyData::isKeyPressed(const reshade::api::effect_runtime* runtime)
+	bool KeyData::isKeyPressed(const reshade::api::effect_runtime* runtime) const
 	{
+		if (_keyCode == 0)
+		{
+			return false;
+		}
+
+		if (isGamepadCode(_keyCode))
+		{
+			return isGamepadButtonPressed(_keyCode);
+		}
+
 		bool toReturn = runtime->is_key_pressed(_keyCode);
-		const bool altPressed = runtime->is_key_down(VK_MENU);;
+		const bool altPressed = runtime->is_key_down(VK_MENU);
 		const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
 		const bool ctrlPressed = runtime->is_key_down(VK_CONTROL);
 
@@ -124,10 +265,30 @@ namespace ShaderToggler
 		return toReturn;
 	}
 
-
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
-		// from ReShade
+		switch (vkCode)
+		{
+		case GPAD_A:          return "Gamepad A";
+		case GPAD_B:          return "Gamepad B";
+		case GPAD_X:          return "Gamepad X";
+		case GPAD_Y:          return "Gamepad Y";
+		case GPAD_LB:         return "Gamepad LB";
+		case GPAD_RB:         return "Gamepad RB";
+		case GPAD_BACK:       return "Gamepad Back";
+		case GPAD_START:      return "Gamepad Start";
+		case GPAD_LS:         return "Gamepad LS";
+		case GPAD_RS:         return "Gamepad RS";
+		case GPAD_DPAD_UP:    return "Gamepad D-Pad Up";
+		case GPAD_DPAD_DOWN:  return "Gamepad D-Pad Down";
+		case GPAD_DPAD_LEFT:  return "Gamepad D-Pad Left";
+		case GPAD_DPAD_RIGHT: return "Gamepad D-Pad Right";
+		case GPAD_LT:         return "Gamepad LT";
+		case GPAD_RT:         return "Gamepad RT";
+		default:
+			break;
+		}
+
 		static const char *keyboard_keys[256] = {
 			"", "Left Mouse", "Right Mouse", "Cancel", "Middle Mouse", "X1 Mouse", "X2 Mouse", "", "Backspace", "Tab", "", "", "Clear", "Enter", "", "",
 			"Shift", "Control", "Alt", "Pause", "Caps Lock", "", "", "", "", "", "", "Escape", "", "", "", "",
@@ -150,32 +311,42 @@ namespace ShaderToggler
 		return keyboard_keys[vkCode];
 	}
 
-
 	void KeyData::setKeyAsString()
 	{
 		if (!_altRequired && !_ctrlRequired && !_shiftRequired && (_keyCode <= 0))
 		{
-			// empty
 			_keyAsString = "Press a key";
 			return;
 		}
+
 		_keyAsString.clear();
-		if (_altRequired)
+
+		// Gamepad buttons do not use keyboard modifiers
+		if (!isGamepadCode(_keyCode))
 		{
-			_keyAsString.append("Alt + ");
-		}
-		if (_ctrlRequired)
-		{
-			_keyAsString.append("Ctrl + ");
-		}
-		if (_shiftRequired)
-		{
-			_keyAsString.append("Shift + ");
-		}
-		if (_keyCode > 0)
-		{
-			_keyAsString.append(vkCodeToString(_keyCode));
+			if (_altRequired)   _keyAsString.append("Alt + ");
+			if (_ctrlRequired)  _keyAsString.append("Ctrl + ");
+			if (_shiftRequired) _keyAsString.append("Shift + ");
 		}
 
+		if (_keyCode > 0)
+			_keyAsString.append(vkCodeToString(_keyCode));
+	}
+
+	std::string KeyData::toString() const
+	{
+		return _keyAsString;
+	}
+
+	int KeyData::toInt() const
+	{
+		return static_cast<int>(getKeyForIniFile());
+	}
+
+	KeyData KeyData::fromInt(uint32_t value)
+	{
+		KeyData k;
+		k.setKeyFromIniFile(value);
+		return k;
 	}
 }

@@ -2,6 +2,7 @@
 #include "CDataFile.h"
 #include <sstream>
 #include <vector>
+#include <string>
 
 namespace ShaderToggler
 {
@@ -73,6 +74,21 @@ namespace ShaderToggler
 	const std::unordered_set<uint32_t>& ToggleGroup::getVertexShaderHashes() const { return m_vertexShaderHashes; }
 	const std::unordered_set<uint32_t>& ToggleGroup::getComputeShaderHashes() const { return m_computeShaderHashes; }
 
+	void ToggleGroup::clearPassSignatures()
+	{
+		m_passSignatures.clear();
+	}
+
+	void ToggleGroup::storeCollectedPassSignatures(const std::vector<PassSignature>& passes)
+	{
+		m_passSignatures = passes;
+	}
+
+	const std::vector<PassSignature>& ToggleGroup::getPassSignatures() const
+	{
+		return m_passSignatures;
+	}
+
 	ToggleGroup ToggleGroup::makeDuplicate() const
 	{
 		ToggleGroup copy(*this);
@@ -86,6 +102,7 @@ namespace ShaderToggler
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
+		clearPassSignatures();
 
 		if (index < 0)
 		{
@@ -116,6 +133,7 @@ namespace ShaderToggler
 			m_name = "Default";
 			m_activeAtStartup = false;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
+			m_active = m_activeAtStartup;
 			return;
 		}
 
@@ -124,29 +142,97 @@ namespace ShaderToggler
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
+		const std::string passesCategory = sectionRoot + "_Passes";
 
 		int amountShaders = iniFile.GetInt("AmountHashes", vertexHashesCategory);
-		for (int i = 0; i < amountShaders; i++)
+		if (amountShaders != INT_MIN)
 		{
-			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), vertexHashesCategory);
-			if (hash != UINT_MAX)
-				m_vertexShaderHashes.insert(hash);
+			for (int i = 0; i < amountShaders; i++)
+			{
+				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), vertexHashesCategory);
+				if (hash != UINT_MAX)
+					m_vertexShaderHashes.insert(hash);
+			}
 		}
 
 		amountShaders = iniFile.GetInt("AmountHashes", pixelHashesCategory);
-		for (int i = 0; i < amountShaders; i++)
+		if (amountShaders != INT_MIN)
 		{
-			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), pixelHashesCategory);
-			if (hash != UINT_MAX)
-				m_pixelShaderHashes.insert(hash);
+			for (int i = 0; i < amountShaders; i++)
+			{
+				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), pixelHashesCategory);
+				if (hash != UINT_MAX)
+					m_pixelShaderHashes.insert(hash);
+			}
 		}
 
 		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
-		for (int i = 0; i < amountShaders; i++)
+		if (amountShaders != INT_MIN)
 		{
-			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
-			if (hash != UINT_MAX)
-				m_computeShaderHashes.insert(hash);
+			for (int i = 0; i < amountShaders; i++)
+			{
+				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
+				if (hash != UINT_MAX)
+					m_computeShaderHashes.insert(hash);
+			}
+		}
+
+		const int amountPasses = iniFile.GetInt("AmountPasses", passesCategory);
+		if (amountPasses != INT_MIN)
+		{
+			for (int i = 0; i < amountPasses; ++i)
+			{
+				PassSignature sig{};
+
+				const std::string keyPrefix = "Pass" + std::to_string(i);
+
+				uint32_t pipelineLo = iniFile.GetUInt(keyPrefix + "_PipelineLo", passesCategory);
+				uint32_t pipelineHi = iniFile.GetUInt(keyPrefix + "_PipelineHi", passesCategory);
+				if (pipelineLo != UINT_MAX && pipelineHi != UINT_MAX)
+				{
+					sig.pixelPipeline =
+						(static_cast<uint64_t>(pipelineHi) << 32) |
+						static_cast<uint64_t>(pipelineLo);
+				}
+
+				uint32_t rtvLo = iniFile.GetUInt(keyPrefix + "_RTVLo", passesCategory);
+				uint32_t rtvHi = iniFile.GetUInt(keyPrefix + "_RTVHi", passesCategory);
+				if (rtvLo != UINT_MAX && rtvHi != UINT_MAX)
+				{
+					sig.renderTargetView =
+						(static_cast<uint64_t>(rtvHi) << 32) |
+						static_cast<uint64_t>(rtvLo);
+				}
+
+				const std::string hasViewportValue = iniFile.GetValue(keyPrefix + "_HasViewport", passesCategory);
+				if (!hasViewportValue.empty())
+					sig.hasViewport = iniFile.GetBool(keyPrefix + "_HasViewport", passesCategory);
+
+				float value = iniFile.GetFloat(keyPrefix + "_ViewportX", passesCategory);
+				if (value != FLT_MIN) sig.viewportX = value;
+
+				value = iniFile.GetFloat(keyPrefix + "_ViewportY", passesCategory);
+				if (value != FLT_MIN) sig.viewportY = value;
+
+				value = iniFile.GetFloat(keyPrefix + "_ViewportW", passesCategory);
+				if (value != FLT_MIN) sig.viewportWidth = value;
+
+				value = iniFile.GetFloat(keyPrefix + "_ViewportH", passesCategory);
+				if (value != FLT_MIN) sig.viewportHeight = value;
+
+				uint32_t uintValue = iniFile.GetUInt(keyPrefix + "_Vertices", passesCategory);
+				if (uintValue != UINT_MAX) sig.vertices = uintValue;
+
+				uintValue = iniFile.GetUInt(keyPrefix + "_Indices", passesCategory);
+				if (uintValue != UINT_MAX) sig.indices = uintValue;
+
+				const std::string indexedValue = iniFile.GetValue(keyPrefix + "_Indexed", passesCategory);
+				if (!indexedValue.empty())
+					sig.indexed = iniFile.GetBool(keyPrefix + "_Indexed", passesCategory);
+
+				if (sig.pixelPipeline != 0)
+					m_passSignatures.push_back(sig);
+			}
 		}
 
 		m_name = iniFile.GetValue("Name", sectionRoot);
@@ -170,6 +256,7 @@ namespace ShaderToggler
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
+		const std::string passesCategory = sectionRoot + "_Passes";
 
 		int counter = 0;
 		for (const auto hash : m_vertexShaderHashes)
@@ -194,6 +281,30 @@ namespace ShaderToggler
 			counter++;
 		}
 		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
+
+		counter = 0;
+		for (const auto& pass : m_passSignatures)
+		{
+			const std::string keyPrefix = "Pass" + std::to_string(counter);
+
+			iniFile.SetUInt(keyPrefix + "_PipelineLo", static_cast<uint32_t>(pass.pixelPipeline & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_PipelineHi", static_cast<uint32_t>((pass.pixelPipeline >> 32) & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_RTVLo", static_cast<uint32_t>(pass.renderTargetView & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_RTVHi", static_cast<uint32_t>((pass.renderTargetView >> 32) & 0xFFFFFFFFull), "", passesCategory);
+
+			iniFile.SetBool(keyPrefix + "_HasViewport", pass.hasViewport, "", passesCategory);
+			iniFile.SetFloat(keyPrefix + "_ViewportX", pass.viewportX, "", passesCategory);
+			iniFile.SetFloat(keyPrefix + "_ViewportY", pass.viewportY, "", passesCategory);
+			iniFile.SetFloat(keyPrefix + "_ViewportW", pass.viewportWidth, "", passesCategory);
+			iniFile.SetFloat(keyPrefix + "_ViewportH", pass.viewportHeight, "", passesCategory);
+
+			iniFile.SetUInt(keyPrefix + "_Vertices", pass.vertices, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_Indices", pass.indices, "", passesCategory);
+			iniFile.SetBool(keyPrefix + "_Indexed", pass.indexed, "", passesCategory);
+
+			counter++;
+		}
+		iniFile.SetUInt("AmountPasses", counter, "", passesCategory);
 
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);

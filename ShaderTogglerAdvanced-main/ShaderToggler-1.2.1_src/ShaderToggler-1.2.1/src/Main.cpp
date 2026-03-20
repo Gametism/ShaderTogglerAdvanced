@@ -94,6 +94,7 @@ static std::atomic_uint32_t g_activeCollectorFrameCounter = 0;
 static std::vector<ToggleGroup> g_toggleGroups;
 static std::atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static std::atomic_int g_toggleGroupIdShaderEditing = -1;
+static std::atomic_int g_toggleGroupIdPassEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
@@ -103,7 +104,7 @@ static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static const int g_groupHotkeyDebounceMs = 150;
 
-// Hold-to-cycle state
+// Hold-to-cycle state for shader hunting
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 static int s_holdRepeatMs = 200;
@@ -130,7 +131,7 @@ static bool g_showPassDebugInfo = true;
 static uint32_t g_runtimeWidth = 0;
 static uint32_t g_runtimeHeight = 0;
 
-// New viewport / RT / corner UI controls
+// Viewport / RT / corner UI controls
 static bool g_matchCapturedPassViewport = true;
 static bool g_matchCapturedPassRenderTarget = true;
 static bool g_blockLikelyCornerUiPasses = false;
@@ -147,6 +148,12 @@ static PassSignature g_lastSeenPass;
 static PassSignature g_capturedPass;
 static bool g_enableCapturedPassBlocker = false;
 static bool g_hasCapturedPass = false;
+
+// Pass hunting state
+static std::unordered_map<int, std::vector<PassSignature>> g_groupMarkedPasses;
+static std::vector<PassSignature> g_passCandidates;
+static int g_activePassCandidateIndex = -1;
+static bool g_previewCurrentPass = true;
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
@@ -181,6 +188,49 @@ static std::string toHex64(uint64_t value)
 static bool floatNearlyEqual(float a, float b, float eps = 0.5f)
 {
 	return std::fabs(a - b) <= eps;
+}
+
+static bool passSignaturesEqual(const PassSignature& a, const PassSignature& b)
+{
+	if (a.pixelPipeline != b.pixelPipeline) return false;
+	if (a.renderTargetView != b.renderTargetView) return false;
+	if (a.hasViewport != b.hasViewport) return false;
+	if (a.indexed != b.indexed) return false;
+	if (a.vertices != b.vertices) return false;
+	if (a.indices != b.indices) return false;
+
+	if (a.hasViewport)
+	{
+		if (!floatNearlyEqual(a.viewportX, b.viewportX)) return false;
+		if (!floatNearlyEqual(a.viewportY, b.viewportY)) return false;
+		if (!floatNearlyEqual(a.viewportWidth, b.viewportWidth)) return false;
+		if (!floatNearlyEqual(a.viewportHeight, b.viewportHeight)) return false;
+	}
+
+	return true;
+}
+
+static bool passListContains(const std::vector<PassSignature>& list, const PassSignature& sig)
+{
+	for (const auto& item : list)
+	{
+		if (passSignaturesEqual(item, sig))
+			return true;
+	}
+	return false;
+}
+
+static void togglePassInList(std::vector<PassSignature>& list, const PassSignature& sig)
+{
+	for (auto it = list.begin(); it != list.end(); ++it)
+	{
+		if (passSignaturesEqual(*it, sig))
+		{
+			list.erase(it);
+			return;
+		}
+	}
+	list.push_back(sig);
 }
 
 static std::string buildIniSignature()
@@ -232,6 +282,7 @@ static std::string buildIniSignature()
 	data += "|CornerUiMaxHeightRatio=" + std::to_string(g_cornerUiMaxHeightRatio);
 	data += "|CornerUiEdgeToleranceRatio=" + std::to_string(g_cornerUiEdgeToleranceRatio);
 
+	// Session-only pass marks intentionally not included yet
 	return toHex64(fnv1a64(data));
 }
 
@@ -450,8 +501,44 @@ static bool isLikelyCornerUiPass(command_list* commandList, uint32_t vertex_coun
 	return nearCorner && lowComplexity;
 }
 
+static bool isCurrentPreviewPass(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	if (g_toggleGroupIdPassEditing < 0 || !g_previewCurrentPass)
+		return false;
+	if (g_activePassCandidateIndex < 0 || g_activePassCandidateIndex >= static_cast<int>(g_passCandidates.size()))
+		return false;
+
+	const PassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+	return passSignaturesEqual(current, g_passCandidates[g_activePassCandidateIndex]);
+}
+
+static void collectPassCandidate(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	if (g_toggleGroupIdPassEditing < 0 || commandList == nullptr)
+		return;
+
+	const PassSignature sig = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+
+	if (sig.pixelPipeline == 0 || sig.pixelPipeline == static_cast<uint64_t>(-1))
+		return;
+
+	if (!passListContains(g_passCandidates, sig))
+	{
+		g_passCandidates.push_back(sig);
+		if (g_activePassCandidateIndex < 0)
+			g_activePassCandidateIndex = 0;
+	}
+}
+
 static bool blockPassRuleForDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
+	// Preview current hunted pass first
+	if (isCurrentPreviewPass(commandList, vertex_count, index_count, indexed))
+	{
+		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		return true;
+	}
+
 	if (doesCapturedPassMatch(commandList, vertex_count, index_count, indexed))
 	{
 		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
@@ -849,7 +936,7 @@ static void displayPassSignatureText(const char* label, const PassSignature& sig
 
 static void onReshadeOverlay(reshade::api::effect_runtime *)
 {
-	if (g_toggleGroupIdShaderEditing >= 0)
+	if (g_toggleGroupIdShaderEditing >= 0 || g_toggleGroupIdPassEditing >= 0)
 	{
 		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
 		ImGui::SetNextWindowPos(ImVec2(10, 10));
@@ -864,7 +951,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 		std::string editingGroupName = "";
 		for (auto& group : g_toggleGroups)
 		{
-			if (group.getId() == g_toggleGroupIdShaderEditing)
+			if (group.getId() == g_toggleGroupIdShaderEditing || group.getId() == g_toggleGroupIdPassEditing)
 			{
 				editingGroupName = group.getName();
 				break;
@@ -886,6 +973,28 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 			displayPassSignatureText("Last seen pass", g_lastSeenPass);
 			displayPassSignatureText("Captured pass", g_capturedPass);
 			displayPassSignatureText("Last blocked pass", g_lastBlockedPass);
+		}
+
+		if (g_toggleGroupIdPassEditing >= 0)
+		{
+			ImGui::Separator();
+			ImGui::Text("Editing passes for group: %s", editingGroupName.c_str());
+			ImGui::Text("Pass candidates: %d", static_cast<int>(g_passCandidates.size()));
+
+			if (g_activePassCandidateIndex >= 0 && g_activePassCandidateIndex < static_cast<int>(g_passCandidates.size()))
+			{
+				ImGui::Text("Current pass: %d / %d", g_activePassCandidateIndex + 1, static_cast<int>(g_passCandidates.size()));
+				displayPassSignatureText("Selected pass", g_passCandidates[g_activePassCandidateIndex]);
+
+				auto it = g_groupMarkedPasses.find(g_toggleGroupIdPassEditing.load());
+				const bool isMarked = (it != g_groupMarkedPasses.end()) && passListContains(it->second, g_passCandidates[g_activePassCandidateIndex]);
+				ImGui::Text("Marked: %s", isMarked ? "YES" : "NO");
+				ImGui::Text("Preview hide: %s", g_previewCurrentPass ? "ON" : "OFF");
+				ImGui::Text("Pass hunting hotkeys:");
+				ImGui::Text("Alt + Numpad 1 / 2 = previous / next pass");
+				ImGui::Text("Alt + Numpad 3 = mark / unmark pass");
+				ImGui::Text("Alt + Numpad 0 = toggle preview");
+			}
 		}
 
 		if (g_activeCollectorFrameCounter > 0)
@@ -1004,6 +1113,29 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		}
 	}
 
+	// Group-linked pass blocking (session only for now)
+	const PassSignature currentPass = buildCurrentPassSignature(
+		commandList,
+		commandListData.lastDrawIndexed ? 0 : commandListData.lastVertexCount,
+		commandListData.lastDrawIndexed ? commandListData.lastIndexCount : 0,
+		commandListData.lastDrawIndexed);
+
+	for (auto& group : g_toggleGroups)
+	{
+		if (!group.isActive())
+			continue;
+
+		auto it = g_groupMarkedPasses.find(group.getId());
+		if (it == g_groupMarkedPasses.end())
+			continue;
+
+		if (passListContains(it->second, currentPass))
+		{
+			blockCall = true;
+			break;
+		}
+	}
+
 	return blockCall;
 }
 
@@ -1016,6 +1148,7 @@ static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t, u
 		data.lastIndexCount = 0;
 		data.lastDrawIndexed = false;
 		g_lastSeenPass = buildCurrentPassSignature(commandList, vertex_count, 0, false);
+		collectPassCandidate(commandList, vertex_count, 0, false);
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -1031,6 +1164,7 @@ static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint3
 		data.lastIndexCount = index_count;
 		data.lastDrawIndexed = true;
 		g_lastSeenPass = buildCurrentPassSignature(commandList, 0, index_count, true);
+		collectPassCandidate(commandList, 0, index_count, true);
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -1049,6 +1183,34 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 	default:
 		return false;
 	}
+}
+
+static void endPassEditing(bool, ToggleGroup& groupEditing)
+{
+	if (g_toggleGroupIdPassEditing == groupEditing.getId())
+	{
+		g_toggleGroupIdPassEditing = -1;
+	}
+	g_passCandidates.clear();
+	g_activePassCandidateIndex = -1;
+	g_previewCurrentPass = true;
+}
+
+static void startPassEditing(ToggleGroup& groupEditing)
+{
+	if (g_toggleGroupIdPassEditing == groupEditing.getId())
+	{
+		return;
+	}
+	if (g_toggleGroupIdPassEditing >= 0)
+	{
+		endPassEditing(false, groupEditing);
+	}
+
+	g_toggleGroupIdPassEditing = groupEditing.getId();
+	g_passCandidates.clear();
+	g_activePassCandidateIndex = -1;
+	g_previewCurrentPass = true;
 }
 
 static void onReshadePresent(effect_runtime* runtime)
@@ -1088,8 +1250,10 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 
 	const bool ctrlDown = runtime->is_key_down(VK_CONTROL);
+	const bool altDown = runtime->is_key_down(VK_MENU);
 	auto now = std::chrono::steady_clock::now();
 
+	const int NP0 = VK_NUMPAD0;
 	const int NP1 = VK_NUMPAD1, NAV1 = VK_END;
 	const int NP2 = VK_NUMPAD2, NAV2 = VK_DOWN;
 	const int NP3 = VK_NUMPAD3, NAV3 = VK_NEXT;
@@ -1100,15 +1264,50 @@ static void onReshadePresent(effect_runtime* runtime)
 	const int NP8 = VK_NUMPAD8, NAV8 = VK_UP;
 	const int NP9 = VK_NUMPAD9, NAV9 = VK_PRIOR;
 
+	// Pass hunting hotkeys use ALT + numpad and take priority
+	if (g_toggleGroupIdPassEditing >= 0 && altDown)
+	{
+		if (!g_passCandidates.empty())
+		{
+			if (is_key_pressed_numpad_or_nav(runtime, NP1, NAV1))
+			{
+				g_activePassCandidateIndex--;
+				if (g_activePassCandidateIndex < 0)
+					g_activePassCandidateIndex = static_cast<int>(g_passCandidates.size()) - 1;
+			}
+			if (is_key_pressed_numpad_or_nav(runtime, NP2, NAV2))
+			{
+				g_activePassCandidateIndex++;
+				if (g_activePassCandidateIndex >= static_cast<int>(g_passCandidates.size()))
+					g_activePassCandidateIndex = 0;
+			}
+			if (is_key_pressed_numpad_or_nav(runtime, NP3, NAV3))
+			{
+				if (g_activePassCandidateIndex >= 0 && g_activePassCandidateIndex < static_cast<int>(g_passCandidates.size()))
+				{
+					togglePassInList(g_groupMarkedPasses[g_toggleGroupIdPassEditing], g_passCandidates[g_activePassCandidateIndex]);
+				}
+			}
+		}
+
+		if (runtime->is_key_pressed(NP0))
+		{
+			g_previewCurrentPass = !g_previewCurrentPass;
+		}
+
+		return;
+	}
+
+	// Shader hunting hotkeys
 	bool np1Down = is_key_down_numpad_or_nav(runtime, NP1, NAV1);
 	bool np1Pressed = is_key_pressed_numpad_or_nav(runtime, NP1, NAV1);
-	if (np1Pressed)
+	if (!altDown && np1Pressed)
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP1 = now;
 		s_np1Held = true;
 	}
-	else if (np1Down && s_np1Held &&
+	else if (!altDown && np1Down && s_np1Held &&
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
@@ -1121,13 +1320,13 @@ static void onReshadePresent(effect_runtime* runtime)
 
 	bool np2Down = is_key_down_numpad_or_nav(runtime, NP2, NAV2);
 	bool np2Pressed = is_key_pressed_numpad_or_nav(runtime, NP2, NAV2);
-	if (np2Pressed)
+	if (!altDown && np2Pressed)
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
 		s_lastNP2 = now;
 		s_np2Held = true;
 	}
-	else if (np2Down && s_np2Held &&
+	else if (!altDown && np2Down && s_np2Held &&
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
@@ -1138,20 +1337,20 @@ static void onReshadePresent(effect_runtime* runtime)
 		s_np2Held = false;
 	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP3, NAV3))
+	if (!altDown && is_key_pressed_numpad_or_nav(runtime, NP3, NAV3))
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
 
 	bool np4Down = is_key_down_numpad_or_nav(runtime, NP4, NAV4);
 	bool np4Pressed = is_key_pressed_numpad_or_nav(runtime, NP4, NAV4);
-	if (np4Pressed)
+	if (!altDown && np4Pressed)
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP4 = now;
 		s_np4Held = true;
 	}
-	else if (np4Down && s_np4Held &&
+	else if (!altDown && np4Down && s_np4Held &&
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
@@ -1164,13 +1363,13 @@ static void onReshadePresent(effect_runtime* runtime)
 
 	bool np5Down = is_key_down_numpad_or_nav(runtime, NP5, NAV5);
 	bool np5Pressed = is_key_pressed_numpad_or_nav(runtime, NP5, NAV5);
-	if (np5Pressed)
+	if (!altDown && np5Pressed)
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
 		s_lastNP5 = now;
 		s_np5Held = true;
 	}
-	else if (np5Down && s_np5Held &&
+	else if (!altDown && np5Down && s_np5Held &&
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
@@ -1181,20 +1380,20 @@ static void onReshadePresent(effect_runtime* runtime)
 		s_np5Held = false;
 	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP6, NAV6))
+	if (!altDown && is_key_pressed_numpad_or_nav(runtime, NP6, NAV6))
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
 
 	bool np7Down = is_key_down_numpad_or_nav(runtime, NP7, NAV7);
 	bool np7Pressed = is_key_pressed_numpad_or_nav(runtime, NP7, NAV7);
-	if (np7Pressed)
+	if (!altDown && np7Pressed)
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP7 = now;
 		s_np7Held = true;
 	}
-	else if (np7Down && s_np7Held &&
+	else if (!altDown && np7Down && s_np7Held &&
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
@@ -1207,13 +1406,13 @@ static void onReshadePresent(effect_runtime* runtime)
 
 	bool np8Down = is_key_down_numpad_or_nav(runtime, NP8, NAV8);
 	bool np8Pressed = is_key_pressed_numpad_or_nav(runtime, NP8, NAV8);
-	if (np8Pressed)
+	if (!altDown && np8Pressed)
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
 		s_lastNP8 = now;
 		s_np8Held = true;
 	}
-	else if (np8Down && s_np8Held &&
+	else if (!altDown && np8Down && s_np8Held &&
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
@@ -1224,7 +1423,7 @@ static void onReshadePresent(effect_runtime* runtime)
 		s_np8Held = false;
 	}
 
-	if (is_key_pressed_numpad_or_nav(runtime, NP9, NAV9))
+	if (!altDown && is_key_pressed_numpad_or_nav(runtime, NP9, NAV9))
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
@@ -1313,7 +1512,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	{
 		ImGui::PushTextWrapPos();
 		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex, pixel or compute shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled.");
-		ImGui::TextUnformatted("\nThe following keyboard shortcuts are used when you click a group's 'Change shaders' button:");
+		ImGui::TextUnformatted("\nShader hunting hotkeys:");
 		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pixel shader");
 		ImGui::TextUnformatted("* Ctrl + Numpad 1 / 2: previous/next marked pixel shader");
 		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pixel shader");
@@ -1323,6 +1522,11 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::TextUnformatted("* Numpad 7 / 8: previous/next compute shader");
 		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8: previous/next marked compute shader");
 		ImGui::TextUnformatted("* Numpad 9: mark/unmark current compute shader");
+		ImGui::TextUnformatted("\nPass hunting hotkeys:");
+		ImGui::TextUnformatted("* Alt + Numpad 1 / 2: previous/next pass");
+		ImGui::TextUnformatted("* Alt + Numpad 3: mark/unmark current pass");
+		ImGui::TextUnformatted("* Alt + Numpad 0: toggle preview hide for current pass");
+		ImGui::TextUnformatted("\nPass marks are currently session-only until the next file updates add group persistence.");
 		ImGui::PopTextWrapPos();
 	}
 
@@ -1340,12 +1544,12 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("Render pass control (experimental)", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("Experimental render-pass control. This can block likely fullscreen post-process passes, exact captured passes with viewport/RT matching, and likely corner/UI passes.");
+		ImGui::TextUnformatted("These are low-level experiments. For actual pass identification, use 'Change passes' on a group below.");
 		ImGui::PopTextWrapPos();
 
 		ImGui::Checkbox("Block likely fullscreen passes", &g_blockLikelyFullscreenPasses);
 		ImGui::SameLine();
-		showHelpMarker("Blocks likely fullscreen post-process passes with very low vertex/index counts and an active pixel shader.");
+		showHelpMarker("Global heuristic. Broad and blunt. Not recommended for normal use.");
 
 		ImGui::SliderInt("Max fullscreen pass vertices", &g_fullscreenPassMaxVertices, 3, 128);
 		ImGui::SliderInt("Max fullscreen pass indices", &g_fullscreenPassMaxIndices, 3, 256);
@@ -1354,7 +1558,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
 		ImGui::SameLine();
-		showHelpMarker("Blocks an exact captured pass signature.");
+		showHelpMarker("Global exact blocker based on a captured pass signature.");
 
 		ImGui::Checkbox("Captured pass must match viewport", &g_matchCapturedPassViewport);
 		ImGui::Checkbox("Captured pass must match render target", &g_matchCapturedPassRenderTarget);
@@ -1378,7 +1582,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 		ImGui::Checkbox("Block likely corner/UI passes", &g_blockLikelyCornerUiPasses);
 		ImGui::SameLine();
-		showHelpMarker("Heuristic blocker for small corner/edge viewports that look like HUD/UI passes.");
+		showHelpMarker("Global heuristic for small corner/edge UI-like passes.");
 
 		ImGui::SliderFloat("Corner/UI max area ratio", &g_cornerUiMaxAreaRatio, 0.01f, 1.0f);
 		ImGui::SliderFloat("Corner/UI max width ratio", &g_cornerUiMaxWidthRatio, 0.05f, 1.0f);
@@ -1438,7 +1642,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				if (g_toggleGroupIdShaderEditing == group.getId())
 				{
-					if (ImGui::Button(" Done "))
+					if (ImGui::Button(" Done Shaders "))
 					{
 						endShaderEditing(true, group);
 					}
@@ -1446,7 +1650,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				else
 				{
 					ImGui::BeginDisabled(true);
-					ImGui::Button("      ");
+					ImGui::Button("              ");
 					ImGui::EndDisabled();
 				}
 			}
@@ -1459,7 +1663,39 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			}
 
 			ImGui::SameLine();
-			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", is active" : "");
+			if (g_toggleGroupIdPassEditing >= 0)
+			{
+				if (g_toggleGroupIdPassEditing == group.getId())
+				{
+					if (ImGui::Button(" Done Passes "))
+					{
+						endPassEditing(true, group);
+					}
+				}
+				else
+				{
+					ImGui::BeginDisabled(true);
+					ImGui::Button("             ");
+					ImGui::EndDisabled();
+				}
+			}
+			else
+			{
+				if (ImGui::Button("Change passes"))
+				{
+					startPassEditing(group);
+				}
+			}
+
+			ImGui::SameLine();
+			const int passCount = static_cast<int>(g_groupMarkedPasses[group.getId()].size());
+			ImGui::Text(" %s (%s%s, %d pass%s)",
+				group.getName().c_str(),
+				group.getToggleKeyAsString().c_str(),
+				group.isActive() ? ", is active" : "",
+				passCount,
+				passCount == 1 ? "" : "es");
+
 			if (group.isActiveAtStartup())
 			{
 				ImGui::SameLine();
@@ -1539,6 +1775,11 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			g_toggleGroupIdKeyBindingEditing = -1;
 			g_keyCollector.clear();
 			g_toggleGroupIdShaderEditing = -1;
+			g_toggleGroupIdPassEditing = -1;
+			g_passCandidates.clear();
+			g_activePassCandidateIndex = -1;
+			g_previewCurrentPass = true;
+
 			g_pixelShaderManager.stopHuntingMode();
 			g_vertexShaderManager.stopHuntingMode();
 			g_computeShaderManager.stopHuntingMode();
@@ -1555,6 +1796,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				g_groupHotkeyWasDown.erase(id);
 				g_groupHotkeyLastToggleTime.erase(id);
+				g_groupMarkedPasses.erase(id);
 			}
 
 			saveShaderTogglerIniFile();

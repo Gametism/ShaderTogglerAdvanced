@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <cstdint>
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
@@ -73,11 +74,11 @@ namespace ShaderToggler
 		ToggleGroup makeDuplicate() const;
 
 	private:
-		GroupId m_id;
+		GroupId m_id = 0;
 		std::string m_name;
-		bool m_active;
-		bool m_activeAtStartup;
-		bool m_editing;
+		bool m_active = false;
+		bool m_activeAtStartup = false;
+		bool m_editing = false;
 		KeyData m_toggleKey;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;

@@ -107,10 +107,26 @@ static int g_fullscreenPassMaxIndices = 12;
 static bool g_showPassDebugInfo = true;
 static uint32_t g_runtimeWidth = 0;
 static uint32_t g_runtimeHeight = 0;
+
+// Last blocked pass info
 static uint64_t g_lastBlockedPassPixelPipeline = 0;
 static uint32_t g_lastBlockedPassVertices = 0;
 static uint32_t g_lastBlockedPassIndices = 0;
 static bool g_lastBlockedPassWasIndexed = false;
+
+// Last seen pass info
+static uint64_t g_lastSeenPassPixelPipeline = 0;
+static uint32_t g_lastSeenPassVertices = 0;
+static uint32_t g_lastSeenPassIndices = 0;
+static bool g_lastSeenPassWasIndexed = false;
+
+// Captured pass blocker
+static bool g_enableCapturedPassBlocker = false;
+static bool g_hasCapturedPass = false;
+static uint64_t g_capturedPassPixelPipeline = 0;
+static uint32_t g_capturedPassVertices = 0;
+static uint32_t g_capturedPassIndices = 0;
+static bool g_capturedPassWasIndexed = false;
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
@@ -169,6 +185,12 @@ static std::string buildIniSignature()
 	data += "|FullscreenPassMaxVertices=" + std::to_string(g_fullscreenPassMaxVertices);
 	data += "|FullscreenPassMaxIndices=" + std::to_string(g_fullscreenPassMaxIndices);
 	data += "|ShowPassDebugInfo=" + std::to_string(g_showPassDebugInfo ? 1 : 0);
+	data += "|EnableCapturedPassBlocker=" + std::to_string(g_enableCapturedPassBlocker ? 1 : 0);
+	data += "|HasCapturedPass=" + std::to_string(g_hasCapturedPass ? 1 : 0);
+	data += "|CapturedPassPipeline=" + std::to_string(static_cast<unsigned long long>(g_capturedPassPixelPipeline));
+	data += "|CapturedPassVertices=" + std::to_string(g_capturedPassVertices);
+	data += "|CapturedPassIndices=" + std::to_string(g_capturedPassIndices);
+	data += "|CapturedPassIndexed=" + std::to_string(g_capturedPassWasIndexed ? 1 : 0);
 
 	return toHex64(fnv1a64(data));
 }
@@ -261,8 +283,37 @@ static bool isLikelyFullscreenPass(command_list* commandList, uint32_t vertex_co
 	return false;
 }
 
+static bool doesCapturedPassMatch(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	if (!g_enableCapturedPassBlocker || !g_hasCapturedPass || commandList == nullptr)
+		return false;
+
+	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+	if (commandListData.activePixelShaderPipeline != g_capturedPassPixelPipeline)
+		return false;
+
+	if (indexed != g_capturedPassWasIndexed)
+		return false;
+
+	if (indexed)
+		return index_count == g_capturedPassIndices;
+
+	return vertex_count == g_capturedPassVertices;
+}
+
 static bool blockPassRuleForDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
+	if (doesCapturedPassMatch(commandList, vertex_count, index_count, indexed))
+	{
+		const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+		g_lastBlockedPassPixelPipeline = commandListData.activePixelShaderPipeline;
+		g_lastBlockedPassVertices = vertex_count;
+		g_lastBlockedPassIndices = index_count;
+		g_lastBlockedPassWasIndexed = indexed;
+		return true;
+	}
+
 	if (!isLikelyFullscreenPass(commandList, vertex_count, index_count, indexed))
 		return false;
 
@@ -331,6 +382,35 @@ void loadShaderTogglerIniFile()
 	if (!showPassDebugValue.empty())
 		g_showPassDebugInfo = iniFile.GetBool("ShowPassDebugInfo", "General");
 
+	const t_Str enableCapturedPassBlockerValue = iniFile.GetValue("EnableCapturedPassBlocker", "General");
+	if (!enableCapturedPassBlockerValue.empty())
+		g_enableCapturedPassBlocker = iniFile.GetBool("EnableCapturedPassBlocker", "General");
+
+	const t_Str hasCapturedPassValue = iniFile.GetValue("HasCapturedPass", "General");
+	if (!hasCapturedPassValue.empty())
+		g_hasCapturedPass = iniFile.GetBool("HasCapturedPass", "General");
+
+	uint32_t loadedCapturedVerts = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassVertices", "General"));
+	if (loadedCapturedVerts != UINT_MAX)
+		g_capturedPassVertices = loadedCapturedVerts;
+
+	uint32_t loadedCapturedIndices = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassIndices", "General"));
+	if (loadedCapturedIndices != UINT_MAX)
+		g_capturedPassIndices = loadedCapturedIndices;
+
+	const t_Str capturedIndexedValue = iniFile.GetValue("CapturedPassIndexed", "General");
+	if (!capturedIndexedValue.empty())
+		g_capturedPassWasIndexed = iniFile.GetBool("CapturedPassIndexed", "General");
+
+	uint32_t loadedCapturedPipelineLo = iniFile.GetUInt("CapturedPassPipelineLo", "General");
+	uint32_t loadedCapturedPipelineHi = iniFile.GetUInt("CapturedPassPipelineHi", "General");
+	if (loadedCapturedPipelineLo != UINT_MAX && loadedCapturedPipelineHi != UINT_MAX)
+	{
+		g_capturedPassPixelPipeline =
+			(static_cast<uint64_t>(loadedCapturedPipelineHi) << 32) |
+			static_cast<uint64_t>(loadedCapturedPipelineLo);
+	}
+
 	// Clamp loaded values
 	if (g_fullscreenPassMaxVertices < 3) g_fullscreenPassMaxVertices = 3;
 	if (g_fullscreenPassMaxVertices > 128) g_fullscreenPassMaxVertices = 128;
@@ -376,6 +456,13 @@ void saveShaderTogglerIniFile()
 	iniFile.SetInt("FullscreenPassMaxVertices", g_fullscreenPassMaxVertices, "", "General");
 	iniFile.SetInt("FullscreenPassMaxIndices", g_fullscreenPassMaxIndices, "", "General");
 	iniFile.SetBool("ShowPassDebugInfo", g_showPassDebugInfo, "", "General");
+	iniFile.SetBool("EnableCapturedPassBlocker", g_enableCapturedPassBlocker, "", "General");
+	iniFile.SetBool("HasCapturedPass", g_hasCapturedPass, "", "General");
+	iniFile.SetUInt("CapturedPassVertices", g_capturedPassVertices, "", "General");
+	iniFile.SetUInt("CapturedPassIndices", g_capturedPassIndices, "", "General");
+	iniFile.SetBool("CapturedPassIndexed", g_capturedPassWasIndexed, "", "General");
+	iniFile.SetUInt("CapturedPassPipelineLo", static_cast<uint32_t>(g_capturedPassPixelPipeline & 0xFFFFFFFFull), "", "General");
+	iniFile.SetUInt("CapturedPassPipelineHi", static_cast<uint32_t>((g_capturedPassPixelPipeline >> 32) & 0xFFFFFFFFull), "", "General");
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
@@ -499,6 +586,20 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 			ImGui::Separator();
 			ImGui::Text("Backbuffer size: %u x %u", g_runtimeWidth, g_runtimeHeight);
 			ImGui::Text("Experimental fullscreen pass blocker: %s", g_blockLikelyFullscreenPasses ? "ON" : "OFF");
+			ImGui::Text("Captured pass blocker: %s", g_enableCapturedPassBlocker ? "ON" : "OFF");
+
+			ImGui::Text("Last seen pass: %s, pipeline=%llu, verts=%u, indices=%u",
+				g_lastSeenPassWasIndexed ? "indexed" : "non-indexed",
+				static_cast<unsigned long long>(g_lastSeenPassPixelPipeline),
+				g_lastSeenPassVertices,
+				g_lastSeenPassIndices);
+
+			ImGui::Text("Captured pass: %s, pipeline=%llu, verts=%u, indices=%u",
+				g_capturedPassWasIndexed ? "indexed" : "non-indexed",
+				static_cast<unsigned long long>(g_capturedPassPixelPipeline),
+				g_capturedPassVertices,
+				g_capturedPassIndices);
+
 			ImGui::Text("Last blocked pass: %s, pipeline=%llu, verts=%u, indices=%u",
 				g_lastBlockedPassWasIndexed ? "indexed" : "non-indexed",
 				static_cast<unsigned long long>(g_lastBlockedPassPixelPipeline),
@@ -634,6 +735,11 @@ static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t, u
 		data.lastVertexCount = vertex_count;
 		data.lastIndexCount = 0;
 		data.lastDrawIndexed = false;
+
+		g_lastSeenPassPixelPipeline = data.activePixelShaderPipeline;
+		g_lastSeenPassVertices = vertex_count;
+		g_lastSeenPassIndices = 0;
+		g_lastSeenPassWasIndexed = false;
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -648,6 +754,11 @@ static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint3
 		data.lastVertexCount = 0;
 		data.lastIndexCount = index_count;
 		data.lastDrawIndexed = true;
+
+		g_lastSeenPassPixelPipeline = data.activePixelShaderPipeline;
+		g_lastSeenPassVertices = 0;
+		g_lastSeenPassIndices = index_count;
+		g_lastSeenPassWasIndexed = true;
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -959,7 +1070,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("Render pass control (experimental)", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("This is the first experimental step toward render-pass-based blocking. Instead of blocking by shader hash alone, this can block likely fullscreen post-process passes using draw-call heuristics.");
+		ImGui::TextUnformatted("Experimental render-pass control. This can block likely fullscreen post-process passes using heuristics, or block an exact captured pass signature using active pixel pipeline + draw signature.");
 		ImGui::PopTextWrapPos();
 
 		ImGui::Checkbox("Block likely fullscreen passes", &g_blockLikelyFullscreenPasses);
@@ -968,9 +1079,50 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 		ImGui::SliderInt("Max fullscreen pass vertices", &g_fullscreenPassMaxVertices, 3, 128);
 		ImGui::SliderInt("Max fullscreen pass indices", &g_fullscreenPassMaxIndices, 3, 256);
+
+		ImGui::Separator();
+
+		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
+		ImGui::SameLine();
+		showHelpMarker("Blocks exactly the captured pass signature: active pixel pipeline + indexed/non-indexed mode + exact vertex/index count.");
+
+		if (ImGui::Button("Capture last seen pass"))
+		{
+			g_hasCapturedPass = (g_lastSeenPassPixelPipeline != 0 && g_lastSeenPassPixelPipeline != static_cast<uint64_t>(-1));
+			if (g_hasCapturedPass)
+			{
+				g_capturedPassPixelPipeline = g_lastSeenPassPixelPipeline;
+				g_capturedPassVertices = g_lastSeenPassVertices;
+				g_capturedPassIndices = g_lastSeenPassIndices;
+				g_capturedPassWasIndexed = g_lastSeenPassWasIndexed;
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Clear captured pass"))
+		{
+			g_hasCapturedPass = false;
+			g_capturedPassPixelPipeline = 0;
+			g_capturedPassVertices = 0;
+			g_capturedPassIndices = 0;
+			g_capturedPassWasIndexed = false;
+		}
+
 		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
 
 		ImGui::Text("Backbuffer size: %u x %u", g_runtimeWidth, g_runtimeHeight);
+
+		ImGui::Text("Last seen pass: %s, pipeline=%llu, verts=%u, indices=%u",
+			g_lastSeenPassWasIndexed ? "indexed" : "non-indexed",
+			static_cast<unsigned long long>(g_lastSeenPassPixelPipeline),
+			g_lastSeenPassVertices,
+			g_lastSeenPassIndices);
+
+		ImGui::Text("Captured pass: %s, pipeline=%llu, verts=%u, indices=%u",
+			g_capturedPassWasIndexed ? "indexed" : "non-indexed",
+			static_cast<unsigned long long>(g_capturedPassPixelPipeline),
+			g_capturedPassVertices,
+			g_capturedPassIndices);
+
 		ImGui::Text("Last blocked pass: %s, pipeline=%llu, verts=%u, indices=%u",
 			g_lastBlockedPassWasIndexed ? "indexed" : "non-indexed",
 			static_cast<unsigned long long>(g_lastBlockedPassPixelPipeline),

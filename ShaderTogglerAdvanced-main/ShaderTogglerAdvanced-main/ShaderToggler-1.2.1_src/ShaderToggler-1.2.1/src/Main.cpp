@@ -111,14 +111,15 @@ static const char* GT_FOOTER =
 	"; End of file – Gametism\n"
 	"; ==========================================\n";
 
-// Advanced / expert pass-control state
+// Experimental pass-control state
 static bool g_blockLikelyFullscreenPasses = false;
 static int g_fullscreenPassMaxVertices = 6;
 static int g_fullscreenPassMaxIndices = 12;
-static bool g_showPassDebugInfo = false;
+static bool g_showPassDebugInfo = true;
 static uint32_t g_runtimeWidth = 0;
 static uint32_t g_runtimeHeight = 0;
 
+// Viewport / RT / corner UI controls
 static bool g_matchCapturedPassViewport = true;
 static bool g_matchCapturedPassRenderTarget = true;
 static bool g_blockLikelyCornerUiPasses = false;
@@ -140,6 +141,9 @@ static bool g_hasCapturedPass = false;
 static std::vector<GroupPassSignature> g_passCandidates;
 static int g_activePassCandidateIndex = -1;
 static bool g_previewCurrentPass = true;
+
+// Simple UX toggle
+static bool g_showAdvancedTools = false;
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
@@ -174,17 +178,6 @@ static std::string toHex64(uint64_t value)
 static bool floatNearlyEqual(float a, float b, float eps = 0.5f)
 {
 	return std::fabs(a - b) <= eps;
-}
-
-static const char* getPassMatchModeLabel(PassMatchMode mode)
-{
-	switch (mode)
-	{
-	case PassMatchMode::Exact: return "Exact";
-	case PassMatchMode::Balanced: return "Balanced";
-	case PassMatchMode::Loose: return "Loose / Fullscreen FX";
-	default: return "Balanced";
-	}
 }
 
 static ToggleGroup* findToggleGroupById(int id)
@@ -236,98 +229,11 @@ static bool passSignaturesEqual(const GroupPassSignature& a, const GroupPassSign
 	return true;
 }
 
-static bool passViewportMatches(const GroupPassSignature& stored, const GroupPassSignature& current, float posEps, float sizeEps, bool ignorePosition)
-{
-	if (stored.hasViewport != current.hasViewport)
-		return false;
-
-	if (!stored.hasViewport)
-		return true;
-
-	if (!ignorePosition)
-	{
-		if (!floatNearlyEqual(stored.viewportX, current.viewportX, posEps)) return false;
-		if (!floatNearlyEqual(stored.viewportY, current.viewportY, posEps)) return false;
-	}
-
-	if (!floatNearlyEqual(stored.viewportWidth, current.viewportWidth, sizeEps)) return false;
-	if (!floatNearlyEqual(stored.viewportHeight, current.viewportHeight, sizeEps)) return false;
-
-	return true;
-}
-
-static bool passSignatureMatchesMode(const GroupPassSignature& stored, const GroupPassSignature& current, PassMatchMode mode)
-{
-	if (mode == PassMatchMode::Exact)
-	{
-		return passSignaturesEqual(stored, current);
-	}
-
-	if (stored.pixelPipeline == 0 || current.pixelPipeline == 0)
-		return false;
-
-	if (stored.pixelPipeline != current.pixelPipeline)
-		return false;
-
-	if (stored.indexed != current.indexed)
-		return false;
-
-	if (mode == PassMatchMode::Balanced)
-	{
-		if (stored.indexed)
-		{
-			if (stored.indices != current.indices)
-				return false;
-		}
-		else
-		{
-			if (std::abs(static_cast<int>(stored.vertices) - static_cast<int>(current.vertices)) > 2)
-				return false;
-		}
-
-		if (stored.renderTargetView != 0 && current.renderTargetView != 0)
-		{
-			if (stored.renderTargetView != current.renderTargetView)
-				return false;
-		}
-
-		return passViewportMatches(stored, current, 6.0f, 6.0f, false);
-	}
-
-	// Loose / Fullscreen FX
-	if (stored.indexed)
-	{
-		if (std::abs(static_cast<int>(stored.indices) - static_cast<int>(current.indices)) > 6)
-			return false;
-	}
-	else
-	{
-		if (std::abs(static_cast<int>(stored.vertices) - static_cast<int>(current.vertices)) > 6)
-			return false;
-	}
-
-	const bool viewportMatchesLoose = passViewportMatches(stored, current, 20.0f, 20.0f, true);
-	if (!viewportMatchesLoose)
-		return false;
-
-	return true;
-}
-
 static bool passListContains(const std::vector<GroupPassSignature>& list, const GroupPassSignature& sig)
 {
 	for (const auto& item : list)
 	{
 		if (passSignaturesEqual(item, sig))
-			return true;
-	}
-	return false;
-}
-
-static bool passListContainsWithMode(const std::vector<GroupPassSignature>& list, const GroupPassSignature& sig, PassMatchMode mode)
-{
-	for (const auto& item : list)
-	{
-		if (passSignatureMatchesMode(item, sig, mode))
 			return true;
 	}
 	return false;
@@ -359,7 +265,6 @@ static std::string buildIniSignature()
 		data += "|Name=" + group.getName();
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
-		data += "|PassMode=" + std::to_string(static_cast<int>(group.getPassMatchMode()));
 
 		for (auto v : group.getPixelShaderHashes())
 			data += "|P=" + std::to_string(v);
@@ -690,7 +595,6 @@ void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
 	toAdd.setToggleKey(VK_CAPITAL, false, false, false);
-	toAdd.setPassMatchMode(PassMatchMode::Balanced);
 	g_toggleGroups.push_back(toAdd);
 }
 
@@ -1149,7 +1053,11 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 		if (g_showPassDebugInfo)
 		{
 			ImGui::Separator();
+			ImGui::Text("Backbuffer size: unavailable in this ReShade API version");
 			ImGui::Text("Largest seen viewport: %.1f x %.1f", g_seenMaxViewportWidth, g_seenMaxViewportHeight);
+			ImGui::Text("Fullscreen pass blocker: %s", g_blockLikelyFullscreenPasses ? "ON" : "OFF");
+			ImGui::Text("Captured pass blocker: %s", g_enableCapturedPassBlocker ? "ON" : "OFF");
+			ImGui::Text("Corner/UI pass blocker: %s", g_blockLikelyCornerUiPasses ? "ON" : "OFF");
 			displayPassSignatureText("Last seen pass", g_lastSeenPass);
 			displayPassSignatureText("Captured pass", g_capturedPass);
 			displayPassSignatureText("Last blocked pass", g_lastBlockedPass);
@@ -1173,6 +1081,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 
 				ImGui::Text("Marked: %s", isMarked ? "YES" : "NO");
 				ImGui::Text("Preview hide: %s", g_previewCurrentPass ? "ON" : "OFF");
+				ImGui::Text("Pass hunting hotkeys:");
 				ImGui::Text("Numpad 1 / 2 = previous / next pass");
 				ImGui::Text("Numpad 3 = mark / unmark pass");
 				ImGui::Text("Numpad 0 = toggle preview");
@@ -1188,7 +1097,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 		{
 			if (g_vertexShaderManager.isInHuntingMode() || g_pixelShaderManager.isInHuntingMode() || g_computeShaderManager.isInHuntingMode())
 			{
-				ImGui::Text("Editing shaders for group: %s", editingGroupName.c_str());
+				ImGui::Text("Editing the shaders for group: %s", editingGroupName.c_str());
 			}
 			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
 			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
@@ -1306,7 +1215,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		if (!group.isActive())
 			continue;
 
-		if (passListContainsWithMode(group.getPassSignatures(), currentPass, group.getPassMatchMode()))
+		if (passListContains(group.getPassSignatures(), currentPass))
 		{
 			blockCall = true;
 			break;
@@ -1451,6 +1360,110 @@ static void showHelpMarker(const char* desc)
 	}
 }
 
+static void drawQuickStartSection()
+{
+	if (ImGui::CollapsingHeader("Quick Start", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::BulletText("Create a group with 'New'.");
+		ImGui::BulletText("Open 'Edit' to name it and assign a hotkey.");
+		ImGui::BulletText("Use 'Change shaders' to hunt shaders.");
+		ImGui::BulletText("Use 'Change passes' to hunt passes.");
+		ImGui::BulletText("Press the group's hotkey in-game to toggle it on or off.");
+		ImGui::Spacing();
+		ImGui::TextWrapped("Tip: Most users only need groups, shader hunting, pass hunting, and hotkeys. The advanced pass controls below are optional.");
+	}
+}
+
+static void drawBasicSettingsSection()
+{
+	if (ImGui::CollapsingHeader("Basic Settings", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
+		ImGui::SliderInt("Frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
+		ImGui::SameLine();
+		showHelpMarker("How long shaders are collected after you start shader hunting. Increase this if the effect only appears occasionally.");
+		ImGui::PopItemWidth();
+	}
+}
+
+static void drawPassToolsSection()
+{
+	if (ImGui::CollapsingHeader("Pass Tools", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::TextWrapped("Recommended workflow: use 'Change passes' on a group, then cycle with Numpad 1/2, mark with Numpad 3, and preview with Numpad 0.");
+
+		ImGui::Separator();
+		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
+
+		if (ImGui::Button("Capture last seen pass"))
+		{
+			if (g_lastSeenPass.pixelPipeline != 0 && g_lastSeenPass.pixelPipeline != static_cast<uint64_t>(-1))
+			{
+				g_hasCapturedPass = true;
+				g_capturedPass = g_lastSeenPass;
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Clear captured pass"))
+		{
+			g_hasCapturedPass = false;
+			g_capturedPass = GroupPassSignature{};
+		}
+
+		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
+		ImGui::SameLine();
+		showHelpMarker("Blocks a pass that exactly matches the captured signature. Useful for testing, but group pass hunting is usually the easier method.");
+
+		if (g_enableCapturedPassBlocker)
+		{
+			ImGui::Checkbox("Captured pass must match viewport", &g_matchCapturedPassViewport);
+			ImGui::Checkbox("Captured pass must match render target", &g_matchCapturedPassRenderTarget);
+		}
+
+		if (g_showPassDebugInfo)
+		{
+			ImGui::Separator();
+			ImGui::Text("Largest seen viewport: %.1f x %.1f", g_seenMaxViewportWidth, g_seenMaxViewportHeight);
+			displayPassSignatureText("Last seen pass", g_lastSeenPass);
+			displayPassSignatureText("Captured pass", g_capturedPass);
+			displayPassSignatureText("Last blocked pass", g_lastBlockedPass);
+		}
+	}
+}
+
+static void drawAdvancedToolsSection()
+{
+	if (ImGui::CollapsingHeader("Advanced / Experimental Tools"))
+	{
+		ImGui::TextWrapped("These options are mainly for troubleshooting and edge cases. Most users can ignore them.");
+
+		ImGui::Checkbox("Block likely fullscreen passes", &g_blockLikelyFullscreenPasses);
+		ImGui::SameLine();
+		showHelpMarker("Very broad heuristic. Can be useful for experiments, but may block too much.");
+
+		if (g_blockLikelyFullscreenPasses)
+		{
+			ImGui::SliderInt("Max fullscreen pass vertices", &g_fullscreenPassMaxVertices, 3, 128);
+			ImGui::SliderInt("Max fullscreen pass indices", &g_fullscreenPassMaxIndices, 3, 256);
+		}
+
+		ImGui::Separator();
+
+		ImGui::Checkbox("Block likely corner/UI passes", &g_blockLikelyCornerUiPasses);
+		ImGui::SameLine();
+		showHelpMarker("Heuristic for small passes near screen corners. Also experimental.");
+
+		if (g_blockLikelyCornerUiPasses)
+		{
+			ImGui::SliderFloat("Corner/UI max area ratio", &g_cornerUiMaxAreaRatio, 0.01f, 1.0f);
+			ImGui::SliderFloat("Corner/UI max width ratio", &g_cornerUiMaxWidthRatio, 0.05f, 1.0f);
+			ImGui::SliderFloat("Corner/UI max height ratio", &g_cornerUiMaxHeightRatio, 0.05f, 1.0f);
+			ImGui::SliderFloat("Corner/UI edge tolerance", &g_cornerUiEdgeToleranceRatio, 0.0f, 0.5f);
+		}
+	}
+}
+
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
 	if (g_toggleGroupIdKeyBindingEditing >= 0)
@@ -1458,61 +1471,41 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		g_keyCollector.collectKeysPressed(runtime);
 	}
 
-	if (ImGui::CollapsingHeader("Quick Start", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("Recommended workflow:");
-		ImGui::BulletText("Create a group");
-		ImGui::BulletText("Set a hotkey");
-		ImGui::BulletText("Use Change shaders for normal shader-based toggles");
-		ImGui::BulletText("Use Change passes for effects like vignette, film grain or fullscreen post-process");
-		ImGui::BulletText("For pass-based groups, leave Match Mode on 'Balanced' first");
-		ImGui::PopTextWrapPos();
-	}
-
-	if (ImGui::CollapsingHeader("General info and help"))
-	{
-		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("This add-on lets you create toggle groups made of shaders and/or render passes. Each group can have its own hotkey and startup state.");
-
-		ImGui::TextUnformatted("\nShader hunting hotkeys:");
-		ImGui::BulletText("Numpad 1 / 2: previous / next pixel shader");
-		ImGui::BulletText("Ctrl + Numpad 1 / 2: previous / next marked pixel shader");
-		ImGui::BulletText("Numpad 3: mark / unmark current pixel shader");
-		ImGui::BulletText("Numpad 4 / 5: previous / next vertex shader");
-		ImGui::BulletText("Ctrl + Numpad 4 / 5: previous / next marked vertex shader");
-		ImGui::BulletText("Numpad 6: mark / unmark current vertex shader");
-		ImGui::BulletText("Numpad 7 / 8: previous / next compute shader");
-		ImGui::BulletText("Ctrl + Numpad 7 / 8: previous / next marked compute shader");
-		ImGui::BulletText("Numpad 9: mark / unmark current compute shader");
-
-		ImGui::TextUnformatted("\nPass hunting hotkeys:");
-		ImGui::BulletText("Numpad 1 / 2: previous / next pass");
-		ImGui::BulletText("Numpad 3: mark / unmark current pass");
-		ImGui::BulletText("Numpad 0: toggle preview hide for current pass");
-
-		ImGui::TextUnformatted("\nPass Match Modes:");
-		ImGui::BulletText("Exact: only blocks an almost identical captured pass");
-		ImGui::BulletText("Balanced: best default, works for most post-process passes");
-		ImGui::BulletText("Loose / Fullscreen FX: better for effects like vignette that shift slightly");
-		ImGui::PopTextWrapPos();
-	}
-
-	if (ImGui::CollapsingHeader("Basic Settings", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
-		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
-		ImGui::SameLine();
-		showHelpMarker("Higher values help when the shader or pass only appears occasionally.");
-		ImGui::PopItemWidth();
-	}
-
+	drawQuickStartSection();
 	ImGui::Separator();
 
-	if (ImGui::CollapsingHeader("Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
+	if (ImGui::CollapsingHeader("Help & Hotkeys"))
 	{
-		if (ImGui::Button("New Group"))
+		ImGui::PushTextWrapPos();
+		ImGui::TextUnformatted("The Shader Toggler allows you to create groups with shaders or passes and toggle them on/off with a hotkey.");
+		ImGui::TextUnformatted("\nShader hunting hotkeys:");
+		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pixel shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 1 / 2: previous/next marked pixel shader");
+		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pixel shader");
+		ImGui::TextUnformatted("* Numpad 4 / 5: previous/next vertex shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 4 / 5: previous/next marked vertex shader");
+		ImGui::TextUnformatted("* Numpad 6: mark/unmark current vertex shader");
+		ImGui::TextUnformatted("* Numpad 7 / 8: previous/next compute shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8: previous/next marked compute shader");
+		ImGui::TextUnformatted("* Numpad 9: mark/unmark current compute shader");
+		ImGui::TextUnformatted("\nPass hunting hotkeys:");
+		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pass");
+		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pass");
+		ImGui::TextUnformatted("* Numpad 0: toggle preview hide for current pass");
+		ImGui::TextUnformatted("\nWhen 'Change passes' is active, the numpad controls operate on pass candidates instead of shaders.");
+		ImGui::PopTextWrapPos();
+	}
+
+	drawBasicSettingsSection();
+	ImGui::Separator();
+	drawPassToolsSection();
+	ImGui::Separator();
+	drawAdvancedToolsSection();
+	ImGui::Separator();
+
+	if (ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		if (ImGui::Button(" New "))
 		{
 			addDefaultGroup();
 		}
@@ -1551,7 +1544,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				if (g_toggleGroupIdShaderEditing == group.getId())
 				{
-					if (ImGui::Button("Done Shaders"))
+					if (ImGui::Button(" Done Shaders "))
 					{
 						endShaderEditing(true, group);
 					}
@@ -1559,7 +1552,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				else
 				{
 					ImGui::BeginDisabled(true);
-					ImGui::Button("Done Shaders");
+					ImGui::Button("              ");
 					ImGui::EndDisabled();
 				}
 			}
@@ -1576,7 +1569,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				if (g_toggleGroupIdPassEditing == group.getId())
 				{
-					if (ImGui::Button("Done Passes"))
+					if (ImGui::Button(" Done Passes "))
 					{
 						endPassEditing(true, group);
 					}
@@ -1584,7 +1577,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				else
 				{
 					ImGui::BeginDisabled(true);
-					ImGui::Button("Done Passes");
+					ImGui::Button("             ");
 					ImGui::EndDisabled();
 				}
 			}
@@ -1598,18 +1591,17 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 			ImGui::SameLine();
 			const int passCount = static_cast<int>(group.getPassSignatures().size());
-			ImGui::Text("%s (%s%s, %d pass%s, %s)",
+			ImGui::Text(" %s (%s%s, %d pass%s)",
 				group.getName().c_str(),
 				group.getToggleKeyAsString().c_str(),
-				group.isActive() ? ", active" : "",
+				group.isActive() ? ", is active" : "",
 				passCount,
-				passCount == 1 ? "" : "es",
-				getPassMatchModeLabel(group.getPassMatchMode()));
+				passCount == 1 ? "" : "es");
 
 			if (group.isActiveAtStartup())
 			{
 				ImGui::SameLine();
-				ImGui::Text("(startup)");
+				ImGui::Text(" (Active at startup)");
 			}
 
 			if (group.isEditing())
@@ -1620,13 +1612,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				char tmpBuffer[150] = {};
 				strncpy_s(tmpBuffer, sizeof(tmpBuffer), group.getName().c_str(), _TRUNCATE);
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
-
 				ImGui::Text("Name");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				ImGui::InputText("##Name", tmpBuffer, 149);
 				group.setName(tmpBuffer);
+				ImGui::PopItemWidth();
 
 				bool isKeyEditing = false;
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
 				ImGui::Text("Key shortcut");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				std::string textBoxContents = (g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();
@@ -1653,29 +1646,19 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						endKeyBindingEditing(false, group);
 					}
 				}
+				ImGui::PopItemWidth();
 
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				bool isDefaultActive = group.isActiveAtStartup();
-				ImGui::Text("Active at startup");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				ImGui::Checkbox("##Is active at startup", &isDefaultActive);
+				ImGui::Checkbox("Is active at startup", &isDefaultActive);
 				group.setIsActiveAtStartup(isDefaultActive);
-
-				int passMode = static_cast<int>(group.getPassMatchMode());
-				const char* passModeItems[] = { "Exact", "Balanced", "Loose / Fullscreen FX" };
-				ImGui::Text("Pass match mode");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				if (ImGui::Combo("##PassMatchMode", &passMode, passModeItems, IM_ARRAYSIZE(passModeItems)))
-				{
-					group.setPassMatchMode(static_cast<PassMatchMode>(passMode));
-				}
-				ImGui::SameLine();
-				showHelpMarker("Balanced is the recommended default. Use Loose for fullscreen-style effects like vignette if Exact or Balanced misses them.");
-
 				ImGui::PopItemWidth();
 
 				if (!isKeyEditing)
 				{
-					if (ImGui::Button("Save Group"))
+					if (ImGui::Button("OK"))
 					{
 						group.setEditing(false);
 						g_toggleGroupIdKeyBindingEditing = -1;
@@ -1730,7 +1713,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		}
 	}
 
-	if (ImGui::CollapsingHeader("Group Order"))
+	if (ImGui::CollapsingHeader("Group Order", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
 		ImGui::Separator();
@@ -1772,64 +1755,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		}
 
 		ImGui::EndChild();
-	}
-
-	if (ImGui::CollapsingHeader("Advanced Render Pass Tools"))
-	{
-		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("These are expert-level global heuristics. Most users should ignore this section and use per-group pass matching instead.");
-		ImGui::PopTextWrapPos();
-
-		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
-
-		ImGui::Separator();
-
-		ImGui::Checkbox("Block likely fullscreen passes", &g_blockLikelyFullscreenPasses);
-		ImGui::SameLine();
-		showHelpMarker("Broad global heuristic. Usually leave this off.");
-
-		ImGui::SliderInt("Max fullscreen pass vertices", &g_fullscreenPassMaxVertices, 3, 128);
-		ImGui::SliderInt("Max fullscreen pass indices", &g_fullscreenPassMaxIndices, 3, 256);
-
-		ImGui::Separator();
-
-		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
-		ImGui::SameLine();
-		showHelpMarker("Global exact blocker based on the last captured pass.");
-
-		ImGui::Checkbox("Captured pass must match viewport", &g_matchCapturedPassViewport);
-		ImGui::Checkbox("Captured pass must match render target", &g_matchCapturedPassRenderTarget);
-
-		if (ImGui::Button("Capture last seen pass"))
-		{
-			if (g_lastSeenPass.pixelPipeline != 0 && g_lastSeenPass.pixelPipeline != static_cast<uint64_t>(-1))
-			{
-				g_hasCapturedPass = true;
-				g_capturedPass = g_lastSeenPass;
-			}
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Clear captured pass"))
-		{
-			g_hasCapturedPass = false;
-			g_capturedPass = GroupPassSignature{};
-		}
-
-		ImGui::Separator();
-
-		ImGui::Checkbox("Block likely corner/UI passes", &g_blockLikelyCornerUiPasses);
-		ImGui::SameLine();
-		showHelpMarker("Global heuristic for small corner / edge UI-like passes.");
-
-		ImGui::SliderFloat("Corner/UI max area ratio", &g_cornerUiMaxAreaRatio, 0.01f, 1.0f);
-		ImGui::SliderFloat("Corner/UI max width ratio", &g_cornerUiMaxWidthRatio, 0.05f, 1.0f);
-		ImGui::SliderFloat("Corner/UI max height ratio", &g_cornerUiMaxHeightRatio, 0.05f, 1.0f);
-		ImGui::SliderFloat("Corner/UI edge tolerance", &g_cornerUiEdgeToleranceRatio, 0.0f, 0.5f);
-
-		ImGui::Text("Largest seen viewport: %.1f x %.1f", g_seenMaxViewportWidth, g_seenMaxViewportHeight);
-		displayPassSignatureText("Last seen pass", g_lastSeenPass);
-		displayPassSignatureText("Captured pass", g_capturedPass);
-		displayPassSignatureText("Last blocked pass", g_lastBlockedPass);
 	}
 }
 

@@ -56,6 +56,9 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	uint64_t activePixelShaderPipeline;
 	uint64_t activeVertexShaderPipeline;
 	uint64_t activeComputeShaderPipeline;
+	uint32_t lastVertexCount;
+	uint32_t lastIndexCount;
+	bool lastDrawIndexed;
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
@@ -96,6 +99,18 @@ static const char* GT_FOOTER =
 	"\n; ==========================================\n"
 	"; End of file – Gametism\n"
 	"; ==========================================\n";
+
+// Experimental pass-control state
+static bool g_blockLikelyFullscreenPasses = false;
+static int g_fullscreenPassMaxVertices = 6;
+static int g_fullscreenPassMaxIndices = 12;
+static bool g_showPassDebugInfo = true;
+static uint32_t g_runtimeWidth = 0;
+static uint32_t g_runtimeHeight = 0;
+static uint64_t g_lastBlockedPassPixelPipeline = 0;
+static uint32_t g_lastBlockedPassVertices = 0;
+static uint32_t g_lastBlockedPassIndices = 0;
+static bool g_lastBlockedPassWasIndexed = false;
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
@@ -148,6 +163,12 @@ static std::string buildIniSignature()
 		for (auto v : group.getComputeShaderHashes())
 			data += "|C=" + std::to_string(v);
 	}
+
+	// Include pass-control settings in signature too
+	data += "|BlockLikelyFullscreenPasses=" + std::to_string(g_blockLikelyFullscreenPasses ? 1 : 0);
+	data += "|FullscreenPassMaxVertices=" + std::to_string(g_fullscreenPassMaxVertices);
+	data += "|FullscreenPassMaxIndices=" + std::to_string(g_fullscreenPassMaxIndices);
+	data += "|ShowPassDebugInfo=" + std::to_string(g_showPassDebugInfo ? 1 : 0);
 
 	return toHex64(fnv1a64(data));
 }
@@ -208,6 +229,51 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
+static bool isLikelyFullscreenPass(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	if (!g_blockLikelyFullscreenPasses || commandList == nullptr)
+		return false;
+
+	// Need some runtime size information to consider this meaningful
+	if (g_runtimeWidth == 0 || g_runtimeHeight == 0)
+		return false;
+
+	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+	// Require an active pixel shader, since we're targeting fullscreen/post-process-like passes
+	if (commandListData.activePixelShaderPipeline == static_cast<uint64_t>(-1) || commandListData.activePixelShaderPipeline == 0)
+		return false;
+
+	// Heuristic:
+	// Fullscreen post-process draws are often fullscreen triangle (3 verts)
+	// or fullscreen quad (4-6 verts / a few indices).
+	if (indexed)
+	{
+		if (index_count >= 3 && index_count <= static_cast<uint32_t>(g_fullscreenPassMaxIndices))
+			return true;
+	}
+	else
+	{
+		if (vertex_count >= 3 && vertex_count <= static_cast<uint32_t>(g_fullscreenPassMaxVertices))
+			return true;
+	}
+
+	return false;
+}
+
+static bool blockPassRuleForDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+{
+	if (!isLikelyFullscreenPass(commandList, vertex_count, index_count, indexed))
+		return false;
+
+	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	g_lastBlockedPassPixelPipeline = commandListData.activePixelShaderPipeline;
+	g_lastBlockedPassVertices = vertex_count;
+	g_lastBlockedPassIndices = index_count;
+	g_lastBlockedPassWasIndexed = indexed;
+	return true;
+}
+
 void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
@@ -250,6 +316,27 @@ void loadShaderTogglerIniFile()
 		g_toggleGroups.back().loadState(iniFile, i, usingCustomFormat);
 	}
 
+	// Load experimental pass-control settings
+	g_blockLikelyFullscreenPasses = iniFile.GetBool("BlockLikelyFullscreenPasses", "General");
+
+	int loadedMaxVerts = iniFile.GetInt("FullscreenPassMaxVertices", "General");
+	if (loadedMaxVerts != INT_MIN)
+		g_fullscreenPassMaxVertices = loadedMaxVerts;
+
+	int loadedMaxIndices = iniFile.GetInt("FullscreenPassMaxIndices", "General");
+	if (loadedMaxIndices != INT_MIN)
+		g_fullscreenPassMaxIndices = loadedMaxIndices;
+
+	const t_Str showPassDebugValue = iniFile.GetValue("ShowPassDebugInfo", "General");
+	if (!showPassDebugValue.empty())
+		g_showPassDebugInfo = iniFile.GetBool("ShowPassDebugInfo", "General");
+
+	// Clamp loaded values
+	if (g_fullscreenPassMaxVertices < 3) g_fullscreenPassMaxVertices = 3;
+	if (g_fullscreenPassMaxVertices > 128) g_fullscreenPassMaxVertices = 128;
+	if (g_fullscreenPassMaxIndices < 3) g_fullscreenPassMaxIndices = 3;
+	if (g_fullscreenPassMaxIndices > 256) g_fullscreenPassMaxIndices = 256;
+
 	// Only enforce watermark/signature on custom files
 	if (usingCustomFormat)
 	{
@@ -284,6 +371,12 @@ void saveShaderTogglerIniFile()
 	iniFile.SetValue("Creator", GT_CREATOR, "", "General");
 	iniFile.SetValue(GT_CACHE_KEY, buildIniSignature(), "", "General");
 
+	// Save experimental pass-control settings
+	iniFile.SetBool("BlockLikelyFullscreenPasses", g_blockLikelyFullscreenPasses, "", "General");
+	iniFile.SetInt("FullscreenPassMaxVertices", g_fullscreenPassMaxVertices, "", "General");
+	iniFile.SetInt("FullscreenPassMaxIndices", g_fullscreenPassMaxIndices, "", "General");
+	iniFile.SetBool("ShowPassDebugInfo", g_showPassDebugInfo, "", "General");
+
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
 		g_toggleGroups[i].saveState(iniFile, i, true);
@@ -311,6 +404,9 @@ static void onResetCommandList(command_list *commandList)
 	commandListData.activePixelShaderPipeline = static_cast<uint64_t>(-1);
 	commandListData.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
 	commandListData.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
+	commandListData.lastVertexCount = 0;
+	commandListData.lastIndexCount = 0;
+	commandListData.lastDrawIndexed = false;
 }
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
@@ -398,6 +494,18 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 		displayShaderManagerStats(g_pixelShaderManager, "pixel");
 		displayShaderManagerStats(g_computeShaderManager, "compute");
 
+		if (g_showPassDebugInfo)
+		{
+			ImGui::Separator();
+			ImGui::Text("Backbuffer size: %u x %u", g_runtimeWidth, g_runtimeHeight);
+			ImGui::Text("Experimental fullscreen pass blocker: %s", g_blockLikelyFullscreenPasses ? "ON" : "OFF");
+			ImGui::Text("Last blocked pass: %s, pipeline=%llu, verts=%u, indices=%u",
+				g_lastBlockedPassWasIndexed ? "indexed" : "non-indexed",
+				static_cast<unsigned long long>(g_lastBlockedPassPixelPipeline),
+				g_lastBlockedPassVertices,
+				g_lastBlockedPassIndices);
+		}
+
 		if (g_activeCollectorFrameCounter > 0)
 		{
 			const uint32_t counterValue = g_activeCollectorFrameCounter;
@@ -427,6 +535,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 
 		if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
 		{
+			// Still allow unknown handles to be ignored
 			return;
 		}
 
@@ -517,14 +626,32 @@ bool blockDrawCallForCommandList(command_list* commandList)
 	return blockCall;
 }
 
-static bool onDraw(command_list* commandList, uint32_t, uint32_t, uint32_t, uint32_t)
+static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t, uint32_t, uint32_t)
 {
-	return blockDrawCallForCommandList(commandList);
+	if (commandList != nullptr)
+	{
+		CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+		data.lastVertexCount = vertex_count;
+		data.lastIndexCount = 0;
+		data.lastDrawIndexed = false;
+	}
+
+	return blockDrawCallForCommandList(commandList) ||
+	       blockPassRuleForDraw(commandList, vertex_count, 0, false);
 }
 
-static bool onDrawIndexed(command_list* commandList, uint32_t, uint32_t, uint32_t, int32_t, uint32_t)
+static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint32_t, uint32_t, int32_t, uint32_t)
 {
-	return blockDrawCallForCommandList(commandList);
+	if (commandList != nullptr)
+	{
+		CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+		data.lastVertexCount = 0;
+		data.lastIndexCount = index_count;
+		data.lastDrawIndexed = true;
+	}
+
+	return blockDrawCallForCommandList(commandList) ||
+	       blockPassRuleForDraw(commandList, 0, index_count, true);
 }
 
 static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource, uint64_t, uint32_t, uint32_t)
@@ -547,6 +674,10 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		--g_activeCollectorFrameCounter;
 	}
+
+	// Update runtime size for fullscreen pass heuristics
+	g_runtimeWidth = runtime->get_width();
+	g_runtimeHeight = runtime->get_height();
 
 	// Stable per-group toggle handling using rising edge + debounce
 	for (auto& group : g_toggleGroups)
@@ -824,6 +955,30 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::PopItemWidth();
 	}
 	ImGui::Separator();
+
+	if (ImGui::CollapsingHeader("Render pass control (experimental)", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::PushTextWrapPos();
+		ImGui::TextUnformatted("This is the first experimental step toward render-pass-based blocking. Instead of blocking by shader hash alone, this can block likely fullscreen post-process passes using draw-call heuristics.");
+		ImGui::PopTextWrapPos();
+
+		ImGui::Checkbox("Block likely fullscreen passes", &g_blockLikelyFullscreenPasses);
+		ImGui::SameLine();
+		showHelpMarker("Experimental. Blocks likely fullscreen post-process passes with very low vertex/index counts and an active pixel shader.");
+
+		ImGui::SliderInt("Max fullscreen pass vertices", &g_fullscreenPassMaxVertices, 3, 128);
+		ImGui::SliderInt("Max fullscreen pass indices", &g_fullscreenPassMaxIndices, 3, 256);
+		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
+
+		ImGui::Text("Backbuffer size: %u x %u", g_runtimeWidth, g_runtimeHeight);
+		ImGui::Text("Last blocked pass: %s, pipeline=%llu, verts=%u, indices=%u",
+			g_lastBlockedPassWasIndexed ? "indexed" : "non-indexed",
+			static_cast<unsigned long long>(g_lastBlockedPassPixelPipeline),
+			g_lastBlockedPassVertices,
+			g_lastBlockedPassIndices);
+
+		ImGui::Separator();
+	}
 
 	if (ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
 	{

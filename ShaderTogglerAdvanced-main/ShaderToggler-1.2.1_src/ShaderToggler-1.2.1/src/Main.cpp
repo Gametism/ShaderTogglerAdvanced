@@ -48,6 +48,7 @@ void saveShaderTogglerIniFile();
 
 using namespace reshade::api;
 using namespace ShaderToggler;
+using GroupPassSignature = ShaderToggler::PassSignature;
 
 extern "C" __declspec(dllexport) const char *NAME = "Shader Toggler";
 extern "C" __declspec(dllexport) const char *DESCRIPTION = "Add-on which allows you to define groups of game shaders to toggle on/off with one key press.";
@@ -67,20 +68,6 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	float viewportY;
 	float viewportWidth;
 	float viewportHeight;
-};
-
-struct PassSignature
-{
-	uint64_t pixelPipeline = 0;
-	uint64_t renderTargetView = 0;
-	bool hasViewport = false;
-	float viewportX = 0.0f;
-	float viewportY = 0.0f;
-	float viewportWidth = 0.0f;
-	float viewportHeight = 0.0f;
-	uint32_t vertices = 0;
-	uint32_t indices = 0;
-	bool indexed = false;
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
@@ -143,15 +130,15 @@ static float g_seenMaxViewportWidth = 0.0f;
 static float g_seenMaxViewportHeight = 0.0f;
 
 // Last blocked / seen / captured pass info
-static PassSignature g_lastBlockedPass;
-static PassSignature g_lastSeenPass;
-static PassSignature g_capturedPass;
+static GroupPassSignature g_lastBlockedPass;
+static GroupPassSignature g_lastSeenPass;
+static GroupPassSignature g_capturedPass;
 static bool g_enableCapturedPassBlocker = false;
 static bool g_hasCapturedPass = false;
 
 // Pass hunting state
-static std::unordered_map<int, std::vector<PassSignature>> g_groupMarkedPasses;
-static std::vector<PassSignature> g_passCandidates;
+static std::unordered_map<int, std::vector<GroupPassSignature>> g_groupMarkedPasses;
+static std::vector<GroupPassSignature> g_passCandidates;
 static int g_activePassCandidateIndex = -1;
 static bool g_previewCurrentPass = true;
 
@@ -190,7 +177,7 @@ static bool floatNearlyEqual(float a, float b, float eps = 0.5f)
 	return std::fabs(a - b) <= eps;
 }
 
-static bool passSignaturesEqual(const PassSignature& a, const PassSignature& b)
+static bool passSignaturesEqual(const GroupPassSignature& a, const GroupPassSignature& b)
 {
 	if (a.pixelPipeline != b.pixelPipeline) return false;
 	if (a.renderTargetView != b.renderTargetView) return false;
@@ -210,7 +197,7 @@ static bool passSignaturesEqual(const PassSignature& a, const PassSignature& b)
 	return true;
 }
 
-static bool passListContains(const std::vector<PassSignature>& list, const PassSignature& sig)
+static bool passListContains(const std::vector<GroupPassSignature>& list, const GroupPassSignature& sig)
 {
 	for (const auto& item : list)
 	{
@@ -220,7 +207,7 @@ static bool passListContains(const std::vector<PassSignature>& list, const PassS
 	return false;
 }
 
-static void togglePassInList(std::vector<PassSignature>& list, const PassSignature& sig)
+static void togglePassInList(std::vector<GroupPassSignature>& list, const GroupPassSignature& sig)
 {
 	for (auto it = list.begin(); it != list.end(); ++it)
 	{
@@ -342,9 +329,9 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
-static PassSignature buildCurrentPassSignature(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+static GroupPassSignature buildCurrentPassSignature(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
-	PassSignature sig{};
+	GroupPassSignature sig{};
 
 	if (commandList == nullptr)
 		return sig;
@@ -397,7 +384,7 @@ static bool doesCapturedPassMatch(command_list* commandList, uint32_t vertex_cou
 	if (!g_enableCapturedPassBlocker || !g_hasCapturedPass || commandList == nullptr)
 		return false;
 
-	const PassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+	const GroupPassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
 
 	if (current.pixelPipeline != g_capturedPass.pixelPipeline)
 		return false;
@@ -508,7 +495,7 @@ static bool isCurrentPreviewPass(command_list* commandList, uint32_t vertex_coun
 	if (g_activePassCandidateIndex < 0 || g_activePassCandidateIndex >= static_cast<int>(g_passCandidates.size()))
 		return false;
 
-	const PassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+	const GroupPassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
 	return passSignaturesEqual(current, g_passCandidates[g_activePassCandidateIndex]);
 }
 
@@ -517,7 +504,7 @@ static void collectPassCandidate(command_list* commandList, uint32_t vertex_coun
 	if (g_toggleGroupIdPassEditing < 0 || commandList == nullptr)
 		return;
 
-	const PassSignature sig = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+	const GroupPassSignature sig = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
 
 	if (sig.pixelPipeline == 0 || sig.pixelPipeline == static_cast<uint64_t>(-1))
 		return;
@@ -913,7 +900,7 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 		shaderType, toDisplay.getPipelineCount(), shaderType, toDisplay.getShaderCount());
 }
 
-static void displayPassSignatureText(const char* label, const PassSignature& sig)
+static void displayPassSignatureText(const char* label, const GroupPassSignature& sig)
 {
 	ImGui::Text("%s: %s, pipeline=%llu, rtv=%llu, verts=%u, indices=%u",
 		label,
@@ -1114,7 +1101,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 	}
 
 	// Group-linked pass blocking (session only for now)
-	const PassSignature currentPass = buildCurrentPassSignature(
+	const GroupPassSignature currentPass = buildCurrentPassSignature(
 		commandList,
 		commandListData.lastDrawIndexed ? 0 : commandListData.lastVertexCount,
 		commandListData.lastDrawIndexed ? commandListData.lastIndexCount : 0,
@@ -1575,7 +1562,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		if (ImGui::Button("Clear captured pass"))
 		{
 			g_hasCapturedPass = false;
-			g_capturedPass = PassSignature{};
+			g_capturedPass = GroupPassSignature{};
 		}
 
 		ImGui::Separator();

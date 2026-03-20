@@ -24,6 +24,13 @@ namespace ShaderToggler
 		bool indexed = false;
 	};
 
+	enum class PassMatchMode : int
+	{
+		Exact = 0,
+		Balanced = 1,
+		Loose = 2
+	};
+
 	class ToggleGroup
 	{
 	public:
@@ -54,6 +61,9 @@ namespace ShaderToggler
 		const KeyData& getToggleKey() const;
 		std::string getToggleKeyAsString() const;
 
+		PassMatchMode getPassMatchMode() const;
+		void setPassMatchMode(PassMatchMode mode);
+
 		void clearHashes();
 		void storeCollectedHashes(
 			const std::unordered_set<uint32_t>& pixel,
@@ -80,6 +90,7 @@ namespace ShaderToggler
 		bool m_activeAtStartup = false;
 		bool m_editing = false;
 		KeyData m_toggleKey;
+		PassMatchMode m_passMatchMode = PassMatchMode::Balanced;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;

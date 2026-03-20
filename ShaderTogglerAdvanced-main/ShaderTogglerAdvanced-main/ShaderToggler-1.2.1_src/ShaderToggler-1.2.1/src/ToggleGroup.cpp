@@ -3,13 +3,16 @@
 #include <sstream>
 #include <vector>
 #include <string>
+#include <climits>
+#include <cfloat>
+#include <Windows.h>
 
 namespace ShaderToggler
 {
 	static ToggleGroup::GroupId s_nextGroupId = 1;
 
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
-		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false)
+		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_passMatchMode(PassMatchMode::Balanced)
 	{
 	}
 
@@ -51,6 +54,16 @@ namespace ShaderToggler
 	std::string ToggleGroup::getToggleKeyAsString() const
 	{
 		return m_toggleKey.toString();
+	}
+
+	PassMatchMode ToggleGroup::getPassMatchMode() const
+	{
+		return m_passMatchMode;
+	}
+
+	void ToggleGroup::setPassMatchMode(PassMatchMode mode)
+	{
+		m_passMatchMode = mode;
 	}
 
 	void ToggleGroup::clearHashes()
@@ -103,6 +116,7 @@ namespace ShaderToggler
 	{
 		clearHashes();
 		clearPassSignatures();
+		m_passMatchMode = PassMatchMode::Balanced;
 
 		if (index < 0)
 		{
@@ -245,6 +259,17 @@ namespace ShaderToggler
 		else
 			m_toggleKey = KeyData::fromInt(toggleKeyValue);
 
+		const int passMatchModeValue = iniFile.GetInt("PassMatchMode", sectionRoot);
+		if (passMatchModeValue >= static_cast<int>(PassMatchMode::Exact) &&
+			passMatchModeValue <= static_cast<int>(PassMatchMode::Loose))
+		{
+			m_passMatchMode = static_cast<PassMatchMode>(passMatchModeValue);
+		}
+		else
+		{
+			m_passMatchMode = PassMatchMode::Balanced;
+		}
+
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
 	}
@@ -309,5 +334,6 @@ namespace ShaderToggler
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
+		iniFile.SetInt("PassMatchMode", static_cast<int>(m_passMatchMode), "", sectionRoot);
 	}
 }

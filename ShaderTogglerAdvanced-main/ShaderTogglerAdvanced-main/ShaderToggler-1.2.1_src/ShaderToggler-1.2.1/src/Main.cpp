@@ -80,8 +80,13 @@ static const int g_groupHotkeyDebounceMs = 150;
 
 // Hold-to-cycle state
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
+static std::chrono::steady_clock::time_point s_holdStartNP1, s_holdStartNP2, s_holdStartNP4, s_holdStartNP5, s_holdStartNP7, s_holdStartNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
-static int s_holdRepeatMs = 200;
+
+static const int s_holdRepeatStartMs = 220;
+static const int s_holdRepeatMidMs = 120;
+static const int s_holdRepeatFastMs = 70;
+static const int s_holdRepeatVeryFastMs = 35;
 
 // Watermark / hidden signature
 static const char* GT_CREATOR = "Gametism";
@@ -107,6 +112,20 @@ static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int
 static bool is_key_pressed_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
 	return runtime->is_key_pressed(vk_numpad) || runtime->is_key_pressed(vk_nav);
+}
+
+static int getAcceleratedRepeatMs(const std::chrono::steady_clock::time_point& holdStart, const std::chrono::steady_clock::time_point& now)
+{
+	const auto heldMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - holdStart).count();
+
+	if (heldMs >= 2400)
+		return s_holdRepeatVeryFastMs;
+	if (heldMs >= 1400)
+		return s_holdRepeatFastMs;
+	if (heldMs >= 700)
+		return s_holdRepeatMidMs;
+
+	return s_holdRepeatStartMs;
 }
 
 static uint64_t fnv1a64(const std::string& text)
@@ -686,10 +705,11 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP1 = now;
+		s_holdStartNP1 = now;
 		s_np1Held = true;
 	}
 	else if (np1Down && s_np1Held &&
-		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= s_holdRepeatMs)
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP1).count() >= getAcceleratedRepeatMs(s_holdStartNP1, now))
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP1 = now;
@@ -705,10 +725,11 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
 		s_lastNP2 = now;
+		s_holdStartNP2 = now;
 		s_np2Held = true;
 	}
 	else if (np2Down && s_np2Held &&
-		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= s_holdRepeatMs)
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP2).count() >= getAcceleratedRepeatMs(s_holdStartNP2, now))
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
 		s_lastNP2 = now;
@@ -729,10 +750,11 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP4 = now;
+		s_holdStartNP4 = now;
 		s_np4Held = true;
 	}
 	else if (np4Down && s_np4Held &&
-		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= s_holdRepeatMs)
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP4).count() >= getAcceleratedRepeatMs(s_holdStartNP4, now))
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP4 = now;
@@ -748,10 +770,11 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
 		s_lastNP5 = now;
+		s_holdStartNP5 = now;
 		s_np5Held = true;
 	}
 	else if (np5Down && s_np5Held &&
-		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= s_holdRepeatMs)
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP5).count() >= getAcceleratedRepeatMs(s_holdStartNP5, now))
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
 		s_lastNP5 = now;
@@ -772,10 +795,11 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP7 = now;
+		s_holdStartNP7 = now;
 		s_np7Held = true;
 	}
 	else if (np7Down && s_np7Held &&
-		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= s_holdRepeatMs)
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP7).count() >= getAcceleratedRepeatMs(s_holdStartNP7, now))
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
 		s_lastNP7 = now;
@@ -791,10 +815,11 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
 		s_lastNP8 = now;
+		s_holdStartNP8 = now;
 		s_np8Held = true;
 	}
 	else if (np8Down && s_np8Held &&
-		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= s_holdRepeatMs)
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP8).count() >= getAcceleratedRepeatMs(s_holdStartNP8, now))
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
 		s_lastNP8 = now;
@@ -907,6 +932,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::BulletText("7 / 8 = Prev / Next compute");
 		ImGui::BulletText("Ctrl + 7 / 8 = Prev / Next marked compute");
 		ImGui::BulletText("9 = Mark compute");
+		ImGui::Separator();
+		ImGui::TextWrapped("Hold 1 / 2 / 4 / 5 / 7 / 8 to scroll faster over time.");
 	}
 
 	drawSectionTitle("Settings");

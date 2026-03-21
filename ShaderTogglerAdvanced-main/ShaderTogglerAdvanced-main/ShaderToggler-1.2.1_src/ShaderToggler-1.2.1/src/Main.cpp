@@ -246,7 +246,23 @@ static bool passSignaturesEqual(const GroupPassSignature& a, const GroupPassSign
 	return true;
 }
 
-static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSignature& current, PassMatchMode mode)
+static bool viewportMatchesForPipelineOnly(const GroupPassSignature& stored, const GroupPassSignature& current)
+{
+	if (!stored.hasViewport || !current.hasViewport)
+		return false;
+
+	return floatNearlyEqual(stored.viewportX, current.viewportX, 2.0f) &&
+		   floatNearlyEqual(stored.viewportY, current.viewportY, 2.0f) &&
+		   floatNearlyEqual(stored.viewportWidth, current.viewportWidth, 2.0f) &&
+		   floatNearlyEqual(stored.viewportHeight, current.viewportHeight, 2.0f);
+}
+
+static bool passMatchesMode(
+	const GroupPassSignature& stored,
+	const GroupPassSignature& current,
+	PassMatchMode mode,
+	bool pipelineOnlyMatchViewport,
+	bool pipelineOnlyMatchRenderTarget)
 {
 	if (stored.isCompute != current.isCompute)
 		return false;
@@ -274,6 +290,9 @@ static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSig
 		case PassMatchMode::Loose:
 			return true;
 
+		case PassMatchMode::PipelineOnly:
+			return true;
+
 		default:
 			return false;
 		}
@@ -285,9 +304,6 @@ static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSig
 	if (stored.pixelPipeline != current.pixelPipeline)
 		return false;
 
-	if (stored.indexed != current.indexed)
-		return false;
-
 	switch (mode)
 	{
 	case PassMatchMode::Exact:
@@ -296,6 +312,9 @@ static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSig
 			return false;
 
 		if (stored.hasViewport != current.hasViewport)
+			return false;
+
+		if (stored.indexed != current.indexed)
 			return false;
 
 		if (stored.vertices != current.vertices)
@@ -316,6 +335,9 @@ static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSig
 
 	case PassMatchMode::Balanced:
 	{
+		if (stored.indexed != current.indexed)
+			return false;
+
 		if (stored.hasViewport && current.hasViewport)
 		{
 			if (!floatNearlyEqual(stored.viewportWidth, current.viewportWidth, 2.0f)) return false;
@@ -336,7 +358,25 @@ static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSig
 	}
 
 	case PassMatchMode::Loose:
+	{
+		if (stored.indexed != current.indexed)
+			return false;
 		return true;
+	}
+
+	case PassMatchMode::PipelineOnly:
+	{
+		if (pipelineOnlyMatchRenderTarget && stored.renderTargetView != current.renderTargetView)
+			return false;
+
+		if (pipelineOnlyMatchViewport)
+		{
+			if (!viewportMatchesForPipelineOnly(stored, current))
+				return false;
+		}
+
+		return true;
+	}
 
 	default:
 		return false;
@@ -353,12 +393,19 @@ static bool passListContains(const std::vector<GroupPassSignature>& list, const 
 	return false;
 }
 
-static bool passListContainsForMode(const std::vector<GroupPassSignature>& list, const GroupPassSignature& sig, PassMatchMode mode)
+static bool passListContainsForGroup(const ToggleGroup& group, const GroupPassSignature& sig)
 {
-	for (const auto& item : list)
+	for (const auto& item : group.getPassSignatures())
 	{
-		if (passMatchesMode(item, sig, mode))
+		if (passMatchesMode(
+			item,
+			sig,
+			group.getPassMatchMode(),
+			group.getPipelineOnlyMatchViewport(),
+			group.getPipelineOnlyMatchRenderTarget()))
+		{
 			return true;
+		}
 	}
 	return false;
 }
@@ -383,6 +430,7 @@ static const char* passMatchModeToString(PassMatchMode mode)
 	case PassMatchMode::Exact: return "Exact";
 	case PassMatchMode::Balanced: return "Balanced";
 	case PassMatchMode::Loose: return "Loose";
+	case PassMatchMode::PipelineOnly: return "PipelineOnly";
 	default: return "Balanced";
 	}
 }
@@ -401,6 +449,8 @@ static std::string buildIniSignature()
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
 		data += "|PassMode=" + std::to_string(static_cast<int>(group.getPassMatchMode()));
+		data += "|POMV=" + std::to_string(group.getPipelineOnlyMatchViewport() ? 1 : 0);
+		data += "|POMR=" + std::to_string(group.getPipelineOnlyMatchRenderTarget() ? 1 : 0);
 
 		for (auto v : group.getPixelShaderHashes())
 			data += "|P=" + std::to_string(v);
@@ -1374,7 +1424,14 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 
 				ImGui::Text("Marked: %s", isMarked ? "YES" : "NO");
 				if (editingGroup != nullptr)
+				{
 					ImGui::Text("Match mode: %s", passMatchModeToString(editingGroup->getPassMatchMode()));
+					if (editingGroup->getPassMatchMode() == PassMatchMode::PipelineOnly)
+					{
+						ImGui::Text("PipelineOnly viewport check: %s", editingGroup->getPipelineOnlyMatchViewport() ? "ON" : "OFF");
+						ImGui::Text("PipelineOnly render-target check: %s", editingGroup->getPipelineOnlyMatchRenderTarget() ? "ON" : "OFF");
+					}
+				}
 				ImGui::Text("Preview hide: %s", g_previewCurrentPass ? "ON" : "OFF");
 				ImGui::Text("Pass hunting hotkeys:");
 				ImGui::Text("Numpad 1 / 2 = previous / next pass");
@@ -1522,7 +1579,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		if (!group.isActive())
 			continue;
 
-		if (passListContainsForMode(group.getPassSignatures(), currentPass, group.getPassMatchMode()))
+		if (passListContainsForGroup(group, currentPass))
 		{
 			blockCall = true;
 			break;
@@ -1703,10 +1760,10 @@ static void drawQuickStartSection()
 		ImGui::BulletText("Open 'Edit' to name it and assign a hotkey.");
 		ImGui::BulletText("Use 'Change shaders' to hunt shaders.");
 		ImGui::BulletText("Use 'Change passes' to hunt draw passes and compute dispatches.");
-		ImGui::BulletText("Set pass match mode to Balanced or Loose if Exact misses the effect.");
+		ImGui::BulletText("Use PipelineOnly if Exact/Balanced/Loose still miss the effect.");
 		ImGui::BulletText("Press the group's hotkey in-game to toggle it on or off.");
 		ImGui::Spacing();
-		ImGui::TextWrapped("Tip: Vignette and many post-process effects are usually not textures. They are often full-screen draw passes or compute dispatches.");
+		ImGui::TextWrapped("PipelineOnly is the broad blocker for stubborn final composite passes.");
 	}
 }
 
@@ -1727,7 +1784,7 @@ static void drawPassToolsSection()
 {
 	if (ImGui::CollapsingHeader("Pass Tools", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		ImGui::TextWrapped("Recommended workflow: use 'Change passes' on a group, then cycle with Numpad 1/2, mark with Numpad 3, preview with Numpad 0, and try Balanced mode first.");
+		ImGui::TextWrapped("Recommended workflow: hunt pass, mark it, then try Balanced first. If it still misses, switch the group to PipelineOnly.");
 
 		ImGui::Separator();
 		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
@@ -1752,7 +1809,7 @@ static void drawPassToolsSection()
 
 		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
 		ImGui::SameLine();
-		showHelpMarker("Blocks a captured draw pass or compute dispatch exactly. Useful for testing.");
+		showHelpMarker("Blocks the exact captured pass. Good for testing whether the selected pass is the right one.");
 
 		if (g_enableCapturedPassBlocker && !g_capturedPass.isCompute)
 		{
@@ -2000,7 +2057,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text("Pass match mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				int passMode = static_cast<int>(group.getPassMatchMode());
-				const char* passModeItems[] = { "Exact", "Balanced", "Loose" };
+				const char* passModeItems[] = { "Exact", "Balanced", "Loose", "PipelineOnly" };
 				if (ImGui::Combo("##PassMatchMode", &passMode, passModeItems, IM_ARRAYSIZE(passModeItems)))
 				{
 					group.setPassMatchMode(static_cast<PassMatchMode>(passMode));
@@ -2008,9 +2065,27 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::SameLine();
 				showHelpMarker(
 					"Exact: strict match.\n"
-					"Balanced: same pipeline + similar geometry/dispatch size. Best default.\n"
-					"Loose: same pipeline only. Use when Balanced still misses the effect.");
+					"Balanced: same pipeline + similar geometry/dispatch size.\n"
+					"Loose: same pipeline + same draw/compute type.\n"
+					"PipelineOnly: only pipeline must match. This is the broad blocker for stubborn final passes.");
 				ImGui::PopItemWidth();
+
+				if (group.getPassMatchMode() == PassMatchMode::PipelineOnly)
+				{
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					bool matchViewport = group.getPipelineOnlyMatchViewport();
+					ImGui::Checkbox("PipelineOnly: match viewport", &matchViewport);
+					group.setPipelineOnlyMatchViewport(matchViewport);
+
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					bool matchRT = group.getPipelineOnlyMatchRenderTarget();
+					ImGui::Checkbox("PipelineOnly: match render target", &matchRT);
+					group.setPipelineOnlyMatchRenderTarget(matchRT);
+					ImGui::PopItemWidth();
+				}
 
 				if (!isKeyEditing)
 				{

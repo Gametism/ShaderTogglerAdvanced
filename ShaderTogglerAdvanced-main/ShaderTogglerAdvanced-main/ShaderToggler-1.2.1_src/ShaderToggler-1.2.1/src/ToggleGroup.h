@@ -33,7 +33,8 @@ namespace ShaderToggler
 	{
 		Exact = 0,
 		Balanced = 1,
-		Loose = 2
+		Loose = 2,
+		PipelineOnly = 3
 	};
 
 	class ToggleGroup
@@ -69,6 +70,12 @@ namespace ShaderToggler
 		PassMatchMode getPassMatchMode() const;
 		void setPassMatchMode(PassMatchMode mode);
 
+		bool getPipelineOnlyMatchViewport() const;
+		void setPipelineOnlyMatchViewport(bool value);
+
+		bool getPipelineOnlyMatchRenderTarget() const;
+		void setPipelineOnlyMatchRenderTarget(bool value);
+
 		void clearHashes();
 		void storeCollectedHashes(
 			const std::unordered_set<uint32_t>& pixel,
@@ -96,6 +103,8 @@ namespace ShaderToggler
 		bool m_editing = false;
 		KeyData m_toggleKey;
 		PassMatchMode m_passMatchMode = PassMatchMode::Balanced;
+		bool m_pipelineOnlyMatchViewport = false;
+		bool m_pipelineOnlyMatchRenderTarget = false;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;

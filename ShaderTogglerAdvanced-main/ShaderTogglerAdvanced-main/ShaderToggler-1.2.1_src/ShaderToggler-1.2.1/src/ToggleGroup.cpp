@@ -12,7 +12,14 @@ namespace ShaderToggler
 	static ToggleGroup::GroupId s_nextGroupId = 1;
 
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
-		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_passMatchMode(PassMatchMode::Balanced)
+		: m_id(id),
+		  m_name(name),
+		  m_active(false),
+		  m_activeAtStartup(false),
+		  m_editing(false),
+		  m_passMatchMode(PassMatchMode::Balanced),
+		  m_pipelineOnlyMatchViewport(false),
+		  m_pipelineOnlyMatchRenderTarget(false)
 	{
 	}
 
@@ -66,6 +73,26 @@ namespace ShaderToggler
 		m_passMatchMode = mode;
 	}
 
+	bool ToggleGroup::getPipelineOnlyMatchViewport() const
+	{
+		return m_pipelineOnlyMatchViewport;
+	}
+
+	void ToggleGroup::setPipelineOnlyMatchViewport(bool value)
+	{
+		m_pipelineOnlyMatchViewport = value;
+	}
+
+	bool ToggleGroup::getPipelineOnlyMatchRenderTarget() const
+	{
+		return m_pipelineOnlyMatchRenderTarget;
+	}
+
+	void ToggleGroup::setPipelineOnlyMatchRenderTarget(bool value)
+	{
+		m_pipelineOnlyMatchRenderTarget = value;
+	}
+
 	void ToggleGroup::clearHashes()
 	{
 		m_pixelShaderHashes.clear();
@@ -117,6 +144,8 @@ namespace ShaderToggler
 		clearHashes();
 		clearPassSignatures();
 		m_passMatchMode = PassMatchMode::Balanced;
+		m_pipelineOnlyMatchViewport = false;
+		m_pipelineOnlyMatchRenderTarget = false;
 
 		if (index < 0)
 		{
@@ -283,7 +312,7 @@ namespace ShaderToggler
 
 		const int passMatchModeValue = iniFile.GetInt("PassMatchMode", sectionRoot);
 		if (passMatchModeValue >= static_cast<int>(PassMatchMode::Exact) &&
-			passMatchModeValue <= static_cast<int>(PassMatchMode::Loose))
+			passMatchModeValue <= static_cast<int>(PassMatchMode::PipelineOnly))
 		{
 			m_passMatchMode = static_cast<PassMatchMode>(passMatchModeValue);
 		}
@@ -291,6 +320,14 @@ namespace ShaderToggler
 		{
 			m_passMatchMode = PassMatchMode::Balanced;
 		}
+
+		const std::string matchViewportValue = iniFile.GetValue("PipelineOnlyMatchViewport", sectionRoot);
+		if (!matchViewportValue.empty())
+			m_pipelineOnlyMatchViewport = iniFile.GetBool("PipelineOnlyMatchViewport", sectionRoot);
+
+		const std::string matchRTValue = iniFile.GetValue("PipelineOnlyMatchRenderTarget", sectionRoot);
+		if (!matchRTValue.empty())
+			m_pipelineOnlyMatchRenderTarget = iniFile.GetBool("PipelineOnlyMatchRenderTarget", sectionRoot);
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
@@ -364,5 +401,7 @@ namespace ShaderToggler
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetInt("PassMatchMode", static_cast<int>(m_passMatchMode), "", sectionRoot);
+		iniFile.SetBool("PipelineOnlyMatchViewport", m_pipelineOnlyMatchViewport, "", sectionRoot);
+		iniFile.SetBool("PipelineOnlyMatchRenderTarget", m_pipelineOnlyMatchRenderTarget, "", sectionRoot);
 	}
 }

@@ -9,7 +9,7 @@
 //
 // https://github.com/FransBouma/ShaderToggler
 //
-// Modifications
+// Modifications (including active-at-startup - x86, group reordering, duplication and UI changes)
 // (c) 2026 Sven 'Gametism' Königsmann. All rights reserved.
 //
 /////////////////////////////////////////////////////////////////////////
@@ -391,18 +391,10 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 
 static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 {
-	if (g_toggleGroupIdShaderEditing >= 0)
-	{
-		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
-		ImGui::SetNextWindowPos(ImVec2(10, 10));
-		if (!ImGui::Begin("ShaderTogglerInfo", nullptr,
-			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
-			ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings))
-		{
-			ImGui::End();
-			return;
-		}
+	(void)runtime;
 
+	if (g_toggleGroupIdShaderEditing >= 0 && g_overlayOpacity > 0.0f)
+	{
 		std::string editingGroupName = "";
 		for (auto& group : g_toggleGroups)
 		{
@@ -411,6 +403,22 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 				editingGroupName = group.getName();
 				break;
 			}
+		}
+
+		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
+		ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, 10.0f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+
+		if (!ImGui::Begin("ShaderTogglerInfo", nullptr,
+			ImGuiWindowFlags_NoTitleBar |
+			ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoMove |
+			ImGuiWindowFlags_NoSavedSettings |
+			ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoNav))
+		{
+			ImGui::End();
+			return;
 		}
 
 		displayShaderManagerStats(g_vertexShaderManager, "vertex");
@@ -843,7 +851,9 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("Shader selection parameters", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
+		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.0f, 1.0f);
+		ImGui::SameLine();
+		showHelpMarker("Set this to 0.0 to make the hunting overlay completely invisible.");
 		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
 		ImGui::SameLine();
 		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally.");

@@ -287,15 +287,6 @@ static void applyModernUiStyle()
 	g_uiStyleInitialized = true;
 }
 
-static void drawSectionHeader(const char* text)
-{
-	ImGui::Spacing();
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.92f, 0.98f, 1.0f));
-	ImGui::TextUnformatted(text);
-	ImGui::PopStyleColor();
-	ImGui::Separator();
-}
-
 void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
@@ -983,14 +974,30 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			}
 			else
 			{
-				if (ImGui::Button("Change shaders"))
+				if (ImGui::Button("Hunt Shaders"))
 				{
 					startShaderEditing(group);
 				}
 			}
 
 			ImGui::SameLine();
-			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", is active" : "");
+			ImGui::Text(" %s (%s", group.getName().c_str(), group.getToggleKeyAsString().c_str());
+
+			ImGui::SameLine(0.0f, 0.0f);
+			if (group.isActive())
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+				ImGui::Text(", is active");
+				ImGui::PopStyleColor();
+			}
+			else
+			{
+				ImGui::Text(", not active");
+			}
+
+			ImGui::SameLine(0.0f, 0.0f);
+			ImGui::Text(")");
+
 			if (group.isActiveAtStartup())
 			{
 				ImGui::SameLine();

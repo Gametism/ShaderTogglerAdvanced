@@ -6,7 +6,7 @@ It is designed for **game shaders only**, not ReShade effects.
 Originally created by **Frans "Otis_Inf" Bouma**.  
 Modified and expanded by **Sven "Gametism" Königsmann**.
 
-This version adds a more modern UI, active-at-startup support, group duplication, group reordering, improved hotkey handling, accelerated shader browsing while holding keys, custom config signing, and controller button support through the input system used by the add-on.
+This version adds a more modern UI, active-at-startup support, group duplication, group reordering, improved hotkey handling, accelerated shader browsing while holding keys and controller button support through the input system used by the add-on.
 
 ---
 

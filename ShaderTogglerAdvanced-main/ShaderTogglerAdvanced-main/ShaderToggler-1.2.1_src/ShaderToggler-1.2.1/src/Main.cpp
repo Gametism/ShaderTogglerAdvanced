@@ -102,6 +102,8 @@ static const char* GT_FOOTER =
 	"; End of file\n"
 	"; ==========================================\n";
 
+static bool g_uiStyleInitialized = false;
+
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
 	bool down = runtime->is_key_down(vk_numpad) || runtime->is_key_down(vk_nav);
@@ -225,6 +227,73 @@ static uint32_t calculateShaderHash(void* shaderData)
 
 	const auto shaderDesc = *static_cast<shader_desc *>(shaderData);
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
+}
+
+static void applyModernUiStyle()
+{
+	if (g_uiStyleInitialized)
+		return;
+
+	ImGuiStyle& style = ImGui::GetStyle();
+
+	style.WindowPadding = ImVec2(10.0f, 10.0f);
+	style.FramePadding = ImVec2(9.0f, 6.0f);
+	style.ItemSpacing = ImVec2(8.0f, 7.0f);
+	style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
+	style.CellPadding = ImVec2(6.0f, 5.0f);
+
+	style.WindowRounding = 8.0f;
+	style.ChildRounding = 6.0f;
+	style.FrameRounding = 6.0f;
+	style.PopupRounding = 6.0f;
+	style.ScrollbarRounding = 6.0f;
+	style.GrabRounding = 6.0f;
+	style.TabRounding = 6.0f;
+
+	style.WindowBorderSize = 1.0f;
+	style.ChildBorderSize = 1.0f;
+	style.PopupBorderSize = 1.0f;
+	style.FrameBorderSize = 0.0f;
+
+	style.ScrollbarSize = 14.0f;
+	style.GrabMinSize = 11.0f;
+	style.IndentSpacing = 18.0f;
+
+	style.Colors[ImGuiCol_WindowBg]            = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+	style.Colors[ImGuiCol_ChildBg]             = ImVec4(0.13f, 0.14f, 0.17f, 0.55f);
+	style.Colors[ImGuiCol_PopupBg]             = ImVec4(0.11f, 0.12f, 0.15f, 0.96f);
+	style.Colors[ImGuiCol_Border]              = ImVec4(0.24f, 0.27f, 0.31f, 1.00f);
+	style.Colors[ImGuiCol_Separator]           = ImVec4(0.24f, 0.27f, 0.31f, 1.00f);
+
+	style.Colors[ImGuiCol_FrameBg]             = ImVec4(0.17f, 0.19f, 0.23f, 1.00f);
+	style.Colors[ImGuiCol_FrameBgHovered]      = ImVec4(0.21f, 0.24f, 0.29f, 1.00f);
+	style.Colors[ImGuiCol_FrameBgActive]       = ImVec4(0.24f, 0.28f, 0.34f, 1.00f);
+
+	style.Colors[ImGuiCol_Button]              = ImVec4(0.21f, 0.33f, 0.50f, 1.00f);
+	style.Colors[ImGuiCol_ButtonHovered]       = ImVec4(0.27f, 0.40f, 0.60f, 1.00f);
+	style.Colors[ImGuiCol_ButtonActive]        = ImVec4(0.18f, 0.28f, 0.43f, 1.00f);
+
+	style.Colors[ImGuiCol_Header]              = ImVec4(0.18f, 0.25f, 0.34f, 1.00f);
+	style.Colors[ImGuiCol_HeaderHovered]       = ImVec4(0.24f, 0.32f, 0.43f, 1.00f);
+	style.Colors[ImGuiCol_HeaderActive]        = ImVec4(0.20f, 0.28f, 0.38f, 1.00f);
+
+	style.Colors[ImGuiCol_CheckMark]           = ImVec4(0.45f, 0.73f, 1.00f, 1.00f);
+	style.Colors[ImGuiCol_SliderGrab]          = ImVec4(0.45f, 0.73f, 1.00f, 1.00f);
+	style.Colors[ImGuiCol_SliderGrabActive]    = ImVec4(0.36f, 0.66f, 1.00f, 1.00f);
+
+	style.Colors[ImGuiCol_Text]                = ImVec4(0.94f, 0.95f, 0.97f, 1.00f);
+	style.Colors[ImGuiCol_TextDisabled]        = ImVec4(0.62f, 0.66f, 0.72f, 1.00f);
+
+	g_uiStyleInitialized = true;
+}
+
+static void drawSectionHeader(const char* text)
+{
+	ImGui::Spacing();
+	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.92f, 0.98f, 1.0f));
+	ImGui::TextUnformatted(text);
+	ImGui::PopStyleColor();
+	ImGui::Separator();
 }
 
 void addDefaultGroup()
@@ -407,14 +476,9 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 
 		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
 		ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, 10.0f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
-
 		if (!ImGui::Begin("ShaderTogglerInfo", nullptr,
-			ImGuiWindowFlags_NoTitleBar |
-			ImGuiWindowFlags_AlwaysAutoResize |
-			ImGuiWindowFlags_NoResize |
-			ImGuiWindowFlags_NoMove |
-			ImGuiWindowFlags_NoSavedSettings |
-			ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
 			ImGuiWindowFlags_NoNav))
 		{
 			ImGui::End();
@@ -816,7 +880,7 @@ static void showHelpMarker(const char* desc)
 	if (ImGui::IsItemHovered())
 	{
 		ImGui::BeginTooltip();
-		ImGui::PushTextWrapPos(450.0f);
+		ImGui::PushTextWrapPos(420.0f);
 		ImGui::TextUnformatted(desc);
 		ImGui::PopTextWrapPos();
 		ImGui::EndTooltip();
@@ -825,6 +889,8 @@ static void showHelpMarker(const char* desc)
 
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
+	applyModernUiStyle();
+
 	if (g_toggleGroupIdKeyBindingEditing >= 0)
 	{
 		g_keyCollector.collectKeysPressed(runtime);
@@ -833,18 +899,19 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("General info and help"))
 	{
 		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex, pixel or compute shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled.");
-		ImGui::TextUnformatted("\nThe following keyboard shortcuts are used when you click a group's 'Change shaders' button:");
-		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pixel shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 1 / 2: previous/next marked pixel shader");
-		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pixel shader");
-		ImGui::TextUnformatted("* Numpad 4 / 5: previous/next vertex shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 4 / 5: previous/next marked vertex shader");
-		ImGui::TextUnformatted("* Numpad 6: mark/unmark current vertex shader");
-		ImGui::TextUnformatted("* Numpad 7 / 8: previous/next compute shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8: previous/next marked compute shader");
-		ImGui::TextUnformatted("* Numpad 9: mark/unmark current compute shader");
-		ImGui::TextUnformatted("* Hold Numpad 1 / 2 / 4 / 5 / 7 / 8 to scroll faster over time");
+		ImGui::TextUnformatted("Create groups, assign hotkeys, hunt shaders, and toggle them in-game.");
+		ImGui::TextUnformatted("");
+		ImGui::TextUnformatted("Hunting hotkeys:");
+		ImGui::TextUnformatted("* Numpad 1 / 2 = previous / next pixel shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 1 / 2 = previous / next marked pixel shader");
+		ImGui::TextUnformatted("* Numpad 3 = mark / unmark pixel shader");
+		ImGui::TextUnformatted("* Numpad 4 / 5 = previous / next vertex shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 4 / 5 = previous / next marked vertex shader");
+		ImGui::TextUnformatted("* Numpad 6 = mark / unmark vertex shader");
+		ImGui::TextUnformatted("* Numpad 7 / 8 = previous / next compute shader");
+		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8 = previous / next marked compute shader");
+		ImGui::TextUnformatted("* Numpad 9 = mark / unmark compute shader");
+		ImGui::TextUnformatted("* Hold 1 / 2 / 4 / 5 / 7 / 8 to scroll faster");
 		ImGui::PopTextWrapPos();
 	}
 
@@ -853,10 +920,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
 		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.0f, 1.0f);
 		ImGui::SameLine();
-		showHelpMarker("Set this to 0.0 to make the hunting overlay completely invisible.");
+		showHelpMarker("Set this to 0.0 to make the hunting overlay fully invisible.");
 		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
 		ImGui::SameLine();
-		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally.");
+		showHelpMarker("Increase this if the shader you want only appears occasionally.");
 		ImGui::PopItemWidth();
 	}
 	ImGui::Separator();
@@ -933,7 +1000,9 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			if (group.isEditing())
 			{
 				ImGui::Separator();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.92f, 0.98f, 1.0f));
 				ImGui::Text("Edit group %d", group.getId());
+				ImGui::PopStyleColor();
 
 				char tmpBuffer[150] = {};
 				strncpy_s(tmpBuffer, sizeof(tmpBuffer), group.getName().c_str(), _TRUNCATE);

@@ -2,40 +2,12 @@
 
 #include <string>
 #include <unordered_set>
-#include <vector>
-#include <cstdint>
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
 
 namespace ShaderToggler
 {
-	struct PassSignature
-	{
-		uint64_t pixelPipeline = 0;
-		uint64_t computePipeline = 0;
-		uint64_t renderTargetView = 0;
-		bool hasViewport = false;
-		float viewportX = 0.0f;
-		float viewportY = 0.0f;
-		float viewportWidth = 0.0f;
-		float viewportHeight = 0.0f;
-		uint32_t vertices = 0;
-		uint32_t indices = 0;
-		uint32_t dispatchX = 0;
-		uint32_t dispatchY = 0;
-		uint32_t dispatchZ = 0;
-		bool indexed = false;
-		bool isCompute = false;
-	};
-
-	enum class PassMatchMode : int
-	{
-		Exact = 0,
-		Balanced = 1,
-		Loose = 2
-	};
-
 	class ToggleGroup
 	{
 	public:
@@ -66,9 +38,6 @@ namespace ShaderToggler
 		const KeyData& getToggleKey() const;
 		std::string getToggleKeyAsString() const;
 
-		PassMatchMode getPassMatchMode() const;
-		void setPassMatchMode(PassMatchMode mode);
-
 		void clearHashes();
 		void storeCollectedHashes(
 			const std::unordered_set<uint32_t>& pixel,
@@ -79,28 +48,21 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
-		void clearPassSignatures();
-		void storeCollectedPassSignatures(const std::vector<PassSignature>& passes);
-		const std::vector<PassSignature>& getPassSignatures() const;
-
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
 		ToggleGroup makeDuplicate() const;
 
 	private:
-		GroupId m_id = 0;
+		GroupId m_id;
 		std::string m_name;
-		bool m_active = false;
-		bool m_activeAtStartup = false;
-		bool m_editing = false;
+		bool m_active;
+		bool m_activeAtStartup;
+		bool m_editing;
 		KeyData m_toggleKey;
-		PassMatchMode m_passMatchMode = PassMatchMode::Balanced;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
-
-		std::vector<PassSignature> m_passSignatures;
 	};
 }

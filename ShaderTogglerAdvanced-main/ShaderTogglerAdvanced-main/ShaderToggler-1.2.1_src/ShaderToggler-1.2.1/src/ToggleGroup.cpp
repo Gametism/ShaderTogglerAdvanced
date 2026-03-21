@@ -147,6 +147,7 @@ namespace ShaderToggler
 			m_name = "Default";
 			m_activeAtStartup = false;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
+			m_passMatchMode = PassMatchMode::Balanced;
 			m_active = m_activeAtStartup;
 			return;
 		}

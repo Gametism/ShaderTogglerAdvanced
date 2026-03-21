@@ -981,22 +981,15 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			}
 
 			ImGui::SameLine();
-			ImGui::Text(" %s (%s", group.getName().c_str(), group.getToggleKeyAsString().c_str());
+			ImGui::Text(" %s (%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str());
 
-			ImGui::SameLine(0.0f, 0.0f);
 			if (group.isActive())
 			{
+				ImGui::SameLine();
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-				ImGui::Text(", is active");
+				ImGui::Text("active");
 				ImGui::PopStyleColor();
 			}
-			else
-			{
-				ImGui::Text(", not active");
-			}
-
-			ImGui::SameLine(0.0f, 0.0f);
-			ImGui::Text(")");
 
 			if (group.isActiveAtStartup())
 			{

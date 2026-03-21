@@ -154,7 +154,6 @@ The file is stored in the same folder as `ShaderToggler.addon64`.
 - ShaderToggler Advanced is for **game shader toggling**, not ReShade effect toggling.
 - The UI has been modernized while keeping the original workflow familiar.
 - Controller button mapping support is available through the current input handling implementation.
-- Configuration includes custom metadata and file signing markers added for the Advanced version.
 
 ---
 

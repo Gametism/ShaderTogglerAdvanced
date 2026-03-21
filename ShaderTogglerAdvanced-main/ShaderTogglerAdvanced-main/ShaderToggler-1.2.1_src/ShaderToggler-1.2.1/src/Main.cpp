@@ -9,7 +9,7 @@
 //
 // https://github.com/FransBouma/ShaderToggler
 //
-// Modifications (including active-at-startup - x86, group reordering, duplication and UI changes)
+// Modifications
 // (c) 2026 Sven 'Gametism' Königsmann. All rights reserved.
 //
 /////////////////////////////////////////////////////////////////////////
@@ -341,11 +341,86 @@ static void onDestroyPipeline(device *, pipeline pipelineHandle)
 	g_computeShaderManager.removeHandle(pipelineHandle.handle);
 }
 
+static void applyModernUiStyle()
+{
+	ImGuiStyle& style = ImGui::GetStyle();
+
+	style.WindowPadding = ImVec2(12.0f, 12.0f);
+	style.FramePadding = ImVec2(10.0f, 8.0f);
+	style.ItemSpacing = ImVec2(10.0f, 8.0f);
+	style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
+	style.CellPadding = ImVec2(8.0f, 6.0f);
+
+	style.IndentSpacing = 18.0f;
+	style.ScrollbarSize = 15.0f;
+	style.GrabMinSize = 12.0f;
+
+	style.WindowRounding = 8.0f;
+	style.ChildRounding = 8.0f;
+	style.FrameRounding = 7.0f;
+	style.PopupRounding = 7.0f;
+	style.ScrollbarRounding = 7.0f;
+	style.GrabRounding = 7.0f;
+	style.TabRounding = 7.0f;
+
+	style.WindowBorderSize = 1.0f;
+	style.ChildBorderSize = 1.0f;
+	style.PopupBorderSize = 1.0f;
+	style.FrameBorderSize = 0.0f;
+
+	style.Colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.11f, 1.00f);
+	style.Colors[ImGuiCol_ChildBg] = ImVec4(0.14f, 0.14f, 0.16f, 0.60f);
+	style.Colors[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.18f, 0.21f, 1.00f);
+	style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.24f, 0.24f, 0.28f, 1.00f);
+	style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.28f, 0.33f, 1.00f);
+
+	style.Colors[ImGuiCol_Button] = ImVec4(0.22f, 0.32f, 0.48f, 1.00f);
+	style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.40f, 0.60f, 1.00f);
+	style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.19f, 0.28f, 0.42f, 1.00f);
+
+	style.Colors[ImGuiCol_Header] = ImVec4(0.20f, 0.26f, 0.34f, 1.00f);
+	style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.34f, 0.44f, 1.00f);
+	style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.19f, 0.25f, 0.33f, 1.00f);
+
+	style.Colors[ImGuiCol_Separator] = ImVec4(0.32f, 0.32f, 0.36f, 1.00f);
+	style.Colors[ImGuiCol_Border] = ImVec4(0.28f, 0.28f, 0.32f, 1.00f);
+	style.Colors[ImGuiCol_Text] = ImVec4(0.94f, 0.94f, 0.96f, 1.00f);
+	style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.63f, 0.65f, 0.70f, 1.00f);
+	style.Colors[ImGuiCol_CheckMark] = ImVec4(0.48f, 0.72f, 1.00f, 1.00f);
+	style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.48f, 0.72f, 1.00f, 1.00f);
+	style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.38f, 0.63f, 1.00f, 1.00f);
+}
+
+static void drawSectionTitle(const char* title, const char* subtitle = nullptr)
+{
+	ImGui::Spacing();
+	ImGui::TextUnformatted(title);
+	if (subtitle != nullptr && subtitle[0] != '\0')
+	{
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("%s", subtitle);
+		ImGui::PopStyleColor();
+	}
+	ImGui::Separator();
+}
+
+static bool bigButton(const char* label, float width = 0.0f)
+{
+	return ImGui::Button(label, ImVec2(width, 32.0f));
+}
+
+static void statusText(bool enabled, const char* enabledText, const char* disabledText)
+{
+	ImGui::PushStyleColor(ImGuiCol_Text, enabled ? ImVec4(0.55f, 0.92f, 0.60f, 1.0f) : ImVec4(0.92f, 0.55f, 0.55f, 1.0f));
+	ImGui::TextUnformatted(enabled ? enabledText : disabledText);
+	ImGui::PopStyleColor();
+}
+
 static void displayIsPartOfToggleGroup()
 {
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.35f, 1.0f));
 	ImGui::SameLine();
-	ImGui::Text(" Shader is part of this toggle group.");
+	ImGui::TextUnformatted("Marked");
 	ImGui::PopStyleColor();
 }
 
@@ -353,10 +428,9 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 {
 	if (toDisplay.isInHuntingMode())
 	{
-		ImGui::Text("# of %s shaders active: %d. # of %s shaders in group: %d",
-			shaderType, toDisplay.getAmountShaderHashesCollected(), shaderType, toDisplay.getMarkedShaderCount());
-		ImGui::Text("Current selected %s shader: %d / %d.",
-			shaderType, toDisplay.getActiveHuntedShaderIndex(), toDisplay.getAmountShaderHashesCollected());
+		ImGui::Text("%s active: %d", shaderType, toDisplay.getAmountShaderHashesCollected());
+		ImGui::Text("%s selected: %d / %d", shaderType, toDisplay.getActiveHuntedShaderIndex(), toDisplay.getAmountShaderHashesCollected());
+		ImGui::Text("%s marked: %d", shaderType, toDisplay.getMarkedShaderCount());
 		if (toDisplay.isHuntedShaderMarked())
 		{
 			displayIsPartOfToggleGroup();
@@ -366,25 +440,31 @@ static void displayShaderManagerInfo(ShaderManager& toDisplay, const char* shade
 
 static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shaderType)
 {
-	ImGui::Text("# of pipelines with %s shaders: %d. # of different %s shaders gathered: %d.",
-		shaderType, toDisplay.getPipelineCount(), shaderType, toDisplay.getShaderCount());
+	ImGui::Text("%s pipelines: %d", shaderType, toDisplay.getPipelineCount());
+	ImGui::Text("%s unique shaders: %d", shaderType, toDisplay.getShaderCount());
 }
 
 static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 {
+	(void)runtime;
+
 	if (g_toggleGroupIdShaderEditing >= 0)
 	{
 		ImGui::SetNextWindowBgAlpha(g_overlayOpacity);
-		ImGui::SetNextWindowPos(ImVec2(10, 10));
+		ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
+
 		if (!ImGui::Begin("ShaderTogglerInfo", nullptr,
-			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
-			ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings))
+			ImGuiWindowFlags_NoTitleBar |
+			ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoMove |
+			ImGuiWindowFlags_NoSavedSettings))
 		{
 			ImGui::End();
 			return;
 		}
 
-		std::string editingGroupName = "";
+		std::string editingGroupName;
 		for (auto& group : g_toggleGroups)
 		{
 			if (group.getId() == g_toggleGroupIdShaderEditing)
@@ -394,25 +474,37 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 			}
 		}
 
-		displayShaderManagerStats(g_vertexShaderManager, "vertex");
-		displayShaderManagerStats(g_pixelShaderManager, "pixel");
-		displayShaderManagerStats(g_computeShaderManager, "compute");
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+
+		ImGui::Text("Editing: %s", editingGroupName.c_str());
+		ImGui::Separator();
 
 		if (g_activeCollectorFrameCounter > 0)
 		{
-			const uint32_t counterValue = g_activeCollectorFrameCounter;
-			ImGui::Text("Collecting active shaders... frames to go: %d", counterValue);
+			ImGui::Text("Collecting shaders");
+			ImGui::ProgressBar(
+				1.0f - (static_cast<float>(g_activeCollectorFrameCounter) / static_cast<float>(std::max(1, g_startValueFramecountCollectionPhase))),
+				ImVec2(260.0f, 0.0f),
+				"");
+			ImGui::Text("Frames left: %u", static_cast<uint32_t>(g_activeCollectorFrameCounter));
 		}
 		else
 		{
-			if (g_vertexShaderManager.isInHuntingMode() || g_pixelShaderManager.isInHuntingMode() || g_computeShaderManager.isInHuntingMode())
-			{
-				ImGui::Text("Editing the shaders for group: %s", editingGroupName.c_str());
-			}
-			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
-			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
-			displayShaderManagerInfo(g_computeShaderManager, "compute");
+			displayShaderManagerInfo(g_pixelShaderManager, "Pixel");
+			ImGui::Separator();
+			displayShaderManagerInfo(g_vertexShaderManager, "Vertex");
+			ImGui::Separator();
+			displayShaderManagerInfo(g_computeShaderManager, "Compute");
 		}
+
+		ImGui::Separator();
+		displayShaderManagerStats(g_pixelShaderManager, "Pixel");
+		ImGui::Separator();
+		displayShaderManagerStats(g_vertexShaderManager, "Vertex");
+		ImGui::Separator();
+		displayShaderManagerStats(g_computeShaderManager, "Compute");
+
+		ImGui::PopStyleVar();
 		ImGui::End();
 	}
 }
@@ -783,7 +875,7 @@ static void showHelpMarker(const char* desc)
 	if (ImGui::IsItemHovered())
 	{
 		ImGui::BeginTooltip();
-		ImGui::PushTextWrapPos(450.0f);
+		ImGui::PushTextWrapPos(420.0f);
 		ImGui::TextUnformatted(desc);
 		ImGui::PopTextWrapPos();
 		ImGui::EndTooltip();
@@ -792,255 +884,271 @@ static void showHelpMarker(const char* desc)
 
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
+	applyModernUiStyle();
+
 	if (g_toggleGroupIdKeyBindingEditing >= 0)
 	{
 		g_keyCollector.collectKeysPressed(runtime);
 	}
 
-	if (ImGui::CollapsingHeader("General info and help"))
+	ImGui::SetWindowFontScale(1.06f);
+
+	drawSectionTitle("Shader Toggler", "Create groups, assign hotkeys, hunt shaders, and toggle them in-game.");
+
+	if (ImGui::CollapsingHeader("Quick Help", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted("The Shader Toggler allows you to create one or more groups with shaders to toggle on/off. You can assign a keyboard shortcut (including using keys like Shift, Alt and Control) to each group, including a handy name. Each group can have one or more vertex, pixel or compute shaders assigned to it. When you press the assigned keyboard shortcut, any draw calls using these shaders will be disabled.");
-		ImGui::TextUnformatted("\nThe following keyboard shortcuts are used when you click a group's 'Change shaders' button:");
-		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pixel shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 1 / 2: previous/next marked pixel shader");
-		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pixel shader");
-		ImGui::TextUnformatted("* Numpad 4 / 5: previous/next vertex shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 4 / 5: previous/next marked vertex shader");
-		ImGui::TextUnformatted("* Numpad 6: mark/unmark current vertex shader");
-		ImGui::TextUnformatted("* Numpad 7 / 8: previous/next compute shader");
-		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8: previous/next marked compute shader");
-		ImGui::TextUnformatted("* Numpad 9: mark/unmark current compute shader");
-		ImGui::PopTextWrapPos();
+		ImGui::TextWrapped("Hotkeys while hunting:");
+		ImGui::BulletText("1 / 2 = Prev / Next pixel");
+		ImGui::BulletText("Ctrl + 1 / 2 = Prev / Next marked pixel");
+		ImGui::BulletText("3 = Mark pixel");
+		ImGui::BulletText("4 / 5 = Prev / Next vertex");
+		ImGui::BulletText("Ctrl + 4 / 5 = Prev / Next marked vertex");
+		ImGui::BulletText("6 = Mark vertex");
+		ImGui::BulletText("7 / 8 = Prev / Next compute");
+		ImGui::BulletText("Ctrl + 7 / 8 = Prev / Next marked compute");
+		ImGui::BulletText("9 = Mark compute");
 	}
 
-	if (ImGui::CollapsingHeader("Shader selection parameters", ImGuiTreeNodeFlags_DefaultOpen))
+	drawSectionTitle("Settings");
+
+	ImGui::PushItemWidth(260.0f);
+	ImGui::TextUnformatted("Overlay");
+	ImGui::SameLine(140.0f);
+	ImGui::SliderFloat("##OverlayOpacity", &g_overlayOpacity, 0.01f, 1.0f);
+
+	ImGui::TextUnformatted("Collect frames");
+	ImGui::SameLine(140.0f);
+	ImGui::SliderInt("##CollectFrames", &g_startValueFramecountCollectionPhase, 10, 1000);
+	ImGui::SameLine();
+	showHelpMarker("Increase this if the shader appears only sometimes.");
+	ImGui::PopItemWidth();
+
+	drawSectionTitle("Groups");
+
+	if (bigButton("New Group", 140.0f))
 	{
-		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-		ImGui::SliderFloat("Overlay opacity", &g_overlayOpacity, 0.01f, 1.0f);
-		ImGui::SliderInt("# of frames to collect", &g_startValueFramecountCollectionPhase, 10, 1000);
+		addDefaultGroup();
+	}
+
+	ImGui::Spacing();
+
+	std::vector<int> idsToRemove;
+
+	for (auto& group : g_toggleGroups)
+	{
+		ImGui::PushID(group.getId());
+
+		ImGui::BeginChild("##GroupCard", ImVec2(0, group.isEditing() ? 210.0f : 78.0f), true);
+
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 8.0f));
+
+		ImGui::Text("%s", group.getName().c_str());
 		ImGui::SameLine();
-		showHelpMarker("This is the number of frames the addon will collect active shaders. Set this to a high number if the shader you want to mark is only used occasionally.");
-		ImGui::PopItemWidth();
-	}
-	ImGui::Separator();
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::Text("ID %d", group.getId());
+		ImGui::PopStyleColor();
 
-	if (ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		if (ImGui::Button(" New "))
+		ImGui::Text("Hotkey: %s", group.getToggleKeyAsString().c_str());
+		ImGui::SameLine();
+		statusText(group.isActive(), "Active", "Inactive");
+
+		if (group.isActiveAtStartup())
 		{
-			addDefaultGroup();
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.84f, 1.0f, 1.0f));
+			ImGui::TextUnformatted("Startup");
+			ImGui::PopStyleColor();
 		}
-		ImGui::Separator();
 
-		std::vector<int> idsToRemove;
-
-		for (auto& group : g_toggleGroups)
+		if (bigButton("Edit", 90.0f))
 		{
-			ImGui::PushID(group.getId());
-			ImGui::AlignTextToFramePadding();
+			group.setEditing(true);
+		}
+		ImGui::SameLine();
 
-			if (ImGui::Button("X"))
+		if (bigButton("Duplicate", 110.0f))
+		{
+			g_toggleGroups.push_back(group.makeDuplicate());
+			saveShaderTogglerIniFile();
+		}
+		ImGui::SameLine();
+
+		if (g_toggleGroupIdShaderEditing >= 0)
+		{
+			if (g_toggleGroupIdShaderEditing == group.getId())
 			{
-				idsToRemove.push_back(group.getId());
-			}
-
-			ImGui::SameLine();
-			ImGui::Text(" %d ", group.getId());
-
-			ImGui::SameLine();
-			if (ImGui::Button("Edit"))
-			{
-				group.setEditing(true);
-			}
-
-			ImGui::SameLine();
-			if (ImGui::Button("Duplicate"))
-			{
-				g_toggleGroups.push_back(group.makeDuplicate());
-				saveShaderTogglerIniFile();
-			}
-
-			ImGui::SameLine();
-			if (g_toggleGroupIdShaderEditing >= 0)
-			{
-				if (g_toggleGroupIdShaderEditing == group.getId())
+				if (bigButton("Done", 90.0f))
 				{
-					if (ImGui::Button(" Done "))
-					{
-						endShaderEditing(true, group);
-					}
-				}
-				else
-				{
-					ImGui::BeginDisabled(true);
-					ImGui::Button("      ");
-					ImGui::EndDisabled();
+					endShaderEditing(true, group);
 				}
 			}
 			else
 			{
-				if (ImGui::Button("Change shaders"))
-				{
-					startShaderEditing(group);
-				}
+				ImGui::BeginDisabled(true);
+				bigButton("Busy", 90.0f);
+				ImGui::EndDisabled();
 			}
-
-			ImGui::SameLine();
-			ImGui::Text(" %s (%s%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str(), group.isActive() ? ", is active" : "");
-			if (group.isActiveAtStartup())
+		}
+		else
+		{
+			if (bigButton("Change Shaders", 140.0f))
 			{
-				ImGui::SameLine();
-				ImGui::Text(" (Active at startup)");
+				startShaderEditing(group);
 			}
+		}
+		ImGui::SameLine();
 
-			if (group.isEditing())
-			{
-				ImGui::Separator();
-				ImGui::Text("Edit group %d", group.getId());
-
-				char tmpBuffer[150] = {};
-				strncpy_s(tmpBuffer, sizeof(tmpBuffer), group.getName().c_str(), _TRUNCATE);
-				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
-				ImGui::Text("Name");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				ImGui::InputText("##Name", tmpBuffer, 149);
-				group.setName(tmpBuffer);
-				ImGui::PopItemWidth();
-
-				bool isKeyEditing = false;
-				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-				ImGui::Text("Key shortcut");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				std::string textBoxContents = (g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();
-
-				char keyBuf[128] = {};
-				strncpy_s(keyBuf, sizeof(keyBuf), textBoxContents.c_str(), _TRUNCATE);
-				ImGui::InputText("##Key shortcut", keyBuf, sizeof(keyBuf), ImGuiInputTextFlags_ReadOnly);
-
-				if (ImGui::IsItemClicked())
-				{
-					startKeyBindingEditing(group);
-				}
-				if (g_toggleGroupIdKeyBindingEditing == group.getId())
-				{
-					isKeyEditing = true;
-					ImGui::SameLine();
-					if (ImGui::Button("OK"))
-					{
-						endKeyBindingEditing(true, group);
-					}
-					ImGui::SameLine();
-					if (ImGui::Button("Cancel"))
-					{
-						endKeyBindingEditing(false, group);
-					}
-				}
-				ImGui::PopItemWidth();
-
-				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
-				ImGui::Text(" ");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				bool isDefaultActive = group.isActiveAtStartup();
-				ImGui::Checkbox("Is active at startup", &isDefaultActive);
-				group.setIsActiveAtStartup(isDefaultActive);
-				ImGui::PopItemWidth();
-
-				if (!isKeyEditing)
-				{
-					if (ImGui::Button("OK"))
-					{
-						group.setEditing(false);
-						g_toggleGroupIdKeyBindingEditing = -1;
-						g_keyCollector.clear();
-						saveShaderTogglerIniFile();
-					}
-				}
-				ImGui::Separator();
-			}
-
-			ImGui::PopID();
+		if (bigButton("Delete", 90.0f))
+		{
+			idsToRemove.push_back(group.getId());
 		}
 
-		if (!idsToRemove.empty())
+		if (group.isEditing())
 		{
-			g_toggleGroupIdKeyBindingEditing = -1;
-			g_keyCollector.clear();
-			g_toggleGroupIdShaderEditing = -1;
-			g_pixelShaderManager.stopHuntingMode();
-			g_vertexShaderManager.stopHuntingMode();
-			g_computeShaderManager.stopHuntingMode();
+			ImGui::Separator();
 
-			g_toggleGroups.erase(
-				std::remove_if(g_toggleGroups.begin(), g_toggleGroups.end(),
-					[&](const ToggleGroup& g)
-					{
-						return std::find(idsToRemove.begin(), idsToRemove.end(), g.getId()) != idsToRemove.end();
-					}),
-				g_toggleGroups.end());
+			char tmpBuffer[150] = {};
+			strncpy_s(tmpBuffer, sizeof(tmpBuffer), group.getName().c_str(), _TRUNCATE);
 
-			for (int id : idsToRemove)
+			ImGui::TextUnformatted("Name");
+			ImGui::SetNextItemWidth(280.0f);
+			ImGui::InputText("##Name", tmpBuffer, 149);
+			group.setName(tmpBuffer);
+
+			bool isKeyEditing = false;
+
+			ImGui::TextUnformatted("Hotkey");
+			std::string textBoxContents = (g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();
+
+			char keyBuf[128] = {};
+			strncpy_s(keyBuf, sizeof(keyBuf), textBoxContents.c_str(), _TRUNCATE);
+			ImGui::SetNextItemWidth(220.0f);
+			ImGui::InputText("##KeyShortcut", keyBuf, sizeof(keyBuf), ImGuiInputTextFlags_ReadOnly);
+
+			if (ImGui::IsItemClicked())
 			{
-				g_groupHotkeyWasDown.erase(id);
-				g_groupHotkeyLastToggleTime.erase(id);
+				startKeyBindingEditing(group);
 			}
 
+			if (g_toggleGroupIdKeyBindingEditing == group.getId())
+			{
+				isKeyEditing = true;
+				ImGui::SameLine();
+				if (bigButton("OK", 70.0f))
+				{
+					endKeyBindingEditing(true, group);
+				}
+				ImGui::SameLine();
+				if (bigButton("Cancel", 80.0f))
+				{
+					endKeyBindingEditing(false, group);
+				}
+			}
+
+			bool isDefaultActive = group.isActiveAtStartup();
+			ImGui::Checkbox("Active on startup", &isDefaultActive);
+			group.setIsActiveAtStartup(isDefaultActive);
+
+			if (!isKeyEditing)
+			{
+				if (bigButton("Save Changes", 150.0f))
+				{
+					group.setEditing(false);
+					g_toggleGroupIdKeyBindingEditing = -1;
+					g_keyCollector.clear();
+					saveShaderTogglerIniFile();
+				}
+			}
+		}
+
+		ImGui::PopStyleVar();
+		ImGui::EndChild();
+		ImGui::Spacing();
+
+		ImGui::PopID();
+	}
+
+	if (!idsToRemove.empty())
+	{
+		g_toggleGroupIdKeyBindingEditing = -1;
+		g_keyCollector.clear();
+		g_toggleGroupIdShaderEditing = -1;
+		g_pixelShaderManager.stopHuntingMode();
+		g_vertexShaderManager.stopHuntingMode();
+		g_computeShaderManager.stopHuntingMode();
+
+		g_toggleGroups.erase(
+			std::remove_if(g_toggleGroups.begin(), g_toggleGroups.end(),
+				[&](const ToggleGroup& g)
+				{
+					return std::find(idsToRemove.begin(), idsToRemove.end(), g.getId()) != idsToRemove.end();
+				}),
+			g_toggleGroups.end());
+
+		for (int id : idsToRemove)
+		{
+			g_groupHotkeyWasDown.erase(id);
+			g_groupHotkeyLastToggleTime.erase(id);
+		}
+
+		saveShaderTogglerIniFile();
+	}
+
+	if (!g_toggleGroups.empty())
+	{
+		ImGui::Spacing();
+		if (bigButton("Save All", 120.0f))
+		{
 			saveShaderTogglerIniFile();
 		}
-
-		ImGui::Separator();
-		if (!g_toggleGroups.empty())
-		{
-			if (ImGui::Button("Save all Toggle Groups"))
-			{
-				saveShaderTogglerIniFile();
-			}
-		}
 	}
 
-	if (ImGui::CollapsingHeader("Group Order", ImGuiTreeNodeFlags_DefaultOpen))
+	drawSectionTitle("Order");
+
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
+
+	float computedHeight = 44.0f * static_cast<float>(g_toggleGroups.size()) + 16.0f;
+	float childHeight = (computedHeight < 500.0f) ? computedHeight : 500.0f;
+	ImGui::BeginChild("##grouporder_inline", ImVec2(0, childHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
+
+	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); ++i)
 	{
-		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
-		ImGui::Separator();
+		ImGui::PushID(i);
 
-		float computedHeight = 45.0f * static_cast<float>(g_toggleGroups.size()) + 20.0f;
-		float childHeight = (computedHeight < 600.0f) ? computedHeight : 600.0f;
-		ImGui::BeginChild("##grouporder_inline", ImVec2(0, childHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
+		const std::string &name = g_toggleGroups[i].getName();
+		ImGui::Selectable(name.c_str(), false, 0, ImVec2(0.0f, 28.0f));
 
-		for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); ++i)
+		if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
 		{
-			ImGui::PushID(i);
-			const std::string &name = g_toggleGroups[i].getName();
-			ImGui::Selectable(name.c_str(), false);
-
-			if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
-			{
-				ImGui::SetDragDropPayload("ST_GROUP_INDEX", &i, sizeof(int));
-				ImGui::Text("Move: %s", name.c_str());
-				ImGui::EndDragDropSource();
-			}
-
-			if (ImGui::BeginDragDropTarget())
-			{
-				if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ST_GROUP_INDEX"))
-				{
-					int src = *(const int*)payload->Data;
-					if (src != i)
-					{
-						auto tmp = g_toggleGroups[src];
-						g_toggleGroups.erase(g_toggleGroups.begin() + src);
-						if (src < i) i--;
-						g_toggleGroups.insert(g_toggleGroups.begin() + i, std::move(tmp));
-						saveShaderTogglerIniFile();
-					}
-				}
-				ImGui::EndDragDropTarget();
-			}
-			ImGui::PopID();
+			ImGui::SetDragDropPayload("ST_GROUP_INDEX", &i, sizeof(int));
+			ImGui::Text("Move: %s", name.c_str());
+			ImGui::EndDragDropSource();
 		}
 
-		ImGui::EndChild();
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload *payload = ImGui::AcceptDragDropPayload("ST_GROUP_INDEX"))
+			{
+				int src = *(const int*)payload->Data;
+				if (src != i)
+				{
+					auto tmp = g_toggleGroups[src];
+					g_toggleGroups.erase(g_toggleGroups.begin() + src);
+					if (src < i) i--;
+					g_toggleGroups.insert(g_toggleGroups.begin() + i, std::move(tmp));
+					saveShaderTogglerIniFile();
+				}
+			}
+			ImGui::EndDragDropTarget();
+		}
+
+		ImGui::PopID();
 	}
+
+	ImGui::EndChild();
+	ImGui::PopStyleVar();
+
+	ImGui::SetWindowFontScale(1.0f);
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)

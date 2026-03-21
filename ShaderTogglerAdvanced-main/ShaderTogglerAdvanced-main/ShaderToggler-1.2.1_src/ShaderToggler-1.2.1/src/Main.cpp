@@ -88,18 +88,18 @@ static const int s_holdRepeatMidMs = 120;
 static const int s_holdRepeatFastMs = 70;
 static const int s_holdRepeatVeryFastMs = 35;
 
-// Watermark / hidden signature
+// Sign
 static const char* GT_CREATOR = "Gametism";
 static const char* GT_CACHE_KEY = "CacheStamp";
 static const char* GT_HEADER =
 	"; ==========================================\n"
 	"; ShaderToggler Advanced Configuration\n"
-	"; Created by Gametism\n"
+	"; Originally created by Frans 'Otis_Inf' Bouma and modified by Sven 'Gametism' Koenigsmann\n"
 	"; ==========================================\n\n";
 
 static const char* GT_FOOTER =
 	"\n; ==========================================\n"
-	"; End of file – Gametism\n"
+	"; End of file\n"
 	"; ==========================================\n";
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
@@ -227,7 +227,53 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
-void addDefaultGroup()
+static int getGroupShaderCount(const ToggleGroup& group)
+{
+	return static_cast<int>(
+		group.getPixelShaderHashes().size() +
+		group.getVertexShaderHashes().size() +
+		group.getComputeShaderHashes().size());
+}
+
+static const char* getGroupCostLabel(const ToggleGroup& group)
+{
+	const int total = getGroupShaderCount(group);
+	const int pixelCount = static_cast<int>(group.getPixelShaderHashes().size());
+	const int vertexCount = static_cast<int>(group.getVertexShaderHashes().size());
+	const int computeCount = static_cast<int>(group.getComputeShaderHashes().size());
+
+	if (total == 0)
+		return "None";
+
+	if (computeCount >= 20 || total >= 100)
+		return "High";
+
+	if (computeCount >= 6 || total >= 45 || pixelCount >= 35)
+		return "Moderate";
+
+	if (total >= 12 || pixelCount >= 8 || vertexCount >= 8)
+		return "Low";
+
+	return "Very Low";
+}
+
+static ImVec4 getGroupCostColor(const ToggleGroup& group)
+{
+	const char* label = getGroupCostLabel(group);
+
+	if (std::strcmp(label, "Very Low") == 0)
+		return ImVec4(0.55f, 0.92f, 0.60f, 1.0f);
+	if (std::strcmp(label, "Low") == 0)
+		return ImVec4(0.72f, 0.88f, 0.50f, 1.0f);
+	if (std::strcmp(label, "Moderate") == 0)
+		return ImVec4(0.95f, 0.78f, 0.35f, 1.0f);
+	if (std::strcmp(label, "High") == 0)
+		return ImVec4(0.95f, 0.50f, 0.42f, 1.0f);
+
+	return ImVec4(0.70f, 0.70f, 0.70f, 1.0f);
+}
+
+static void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
 	toAdd.setToggleKey(VK_CAPITAL, false, false, false);
@@ -242,18 +288,15 @@ void loadShaderTogglerIniFile()
 		return;
 	}
 
-	// Try custom format first
 	int numberOfGroups = iniFile.GetInt("GTAmountGroups", "General");
 	bool usingCustomFormat = true;
 
-	// Fall back to regular ShaderToggler format
 	if (numberOfGroups == INT_MIN)
 	{
 		numberOfGroups = iniFile.GetInt("AmountGroups", "General");
 		usingCustomFormat = false;
 	}
 
-	// Legacy pre-group format fallback
 	if (numberOfGroups == INT_MIN)
 	{
 		addDefaultGroup();
@@ -269,7 +312,6 @@ void loadShaderTogglerIniFile()
 		g_toggleGroups.back().loadState(iniFile, i, usingCustomFormat);
 	}
 
-	// Only enforce watermark/signature on custom files
 	if (usingCustomFormat)
 	{
 		const std::string creator = iniFile.GetValue("Creator", "General");
@@ -298,7 +340,6 @@ void saveShaderTogglerIniFile()
 {
 	CDataFile iniFile;
 
-	// Save only in custom format
 	iniFile.SetInt("GTAmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
 	iniFile.SetValue("Creator", GT_CREATOR, "", "General");
 	iniFile.SetValue(GT_CACHE_KEY, buildIniSignature(), "", "General");
@@ -364,23 +405,23 @@ static void applyModernUiStyle()
 {
 	ImGuiStyle& style = ImGui::GetStyle();
 
-	style.WindowPadding = ImVec2(12.0f, 12.0f);
-	style.FramePadding = ImVec2(10.0f, 8.0f);
-	style.ItemSpacing = ImVec2(10.0f, 8.0f);
-	style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
-	style.CellPadding = ImVec2(8.0f, 6.0f);
+	style.WindowPadding = ImVec2(10.0f, 10.0f);
+	style.FramePadding = ImVec2(8.0f, 6.0f);
+	style.ItemSpacing = ImVec2(8.0f, 6.0f);
+	style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+	style.CellPadding = ImVec2(6.0f, 4.0f);
 
-	style.IndentSpacing = 18.0f;
-	style.ScrollbarSize = 15.0f;
-	style.GrabMinSize = 12.0f;
+	style.IndentSpacing = 16.0f;
+	style.ScrollbarSize = 14.0f;
+	style.GrabMinSize = 10.0f;
 
 	style.WindowRounding = 8.0f;
 	style.ChildRounding = 8.0f;
-	style.FrameRounding = 7.0f;
-	style.PopupRounding = 7.0f;
-	style.ScrollbarRounding = 7.0f;
-	style.GrabRounding = 7.0f;
-	style.TabRounding = 7.0f;
+	style.FrameRounding = 6.0f;
+	style.PopupRounding = 6.0f;
+	style.ScrollbarRounding = 6.0f;
+	style.GrabRounding = 6.0f;
+	style.TabRounding = 6.0f;
 
 	style.WindowBorderSize = 1.0f;
 	style.ChildBorderSize = 1.0f;
@@ -423,9 +464,9 @@ static void drawSectionTitle(const char* title, const char* subtitle = nullptr)
 	ImGui::Separator();
 }
 
-static bool bigButton(const char* label, float width = 0.0f)
+static bool compactButton(const char* label, float width = 0.0f)
 {
-	return ImGui::Button(label, ImVec2(width, 32.0f));
+	return ImGui::Button(label, ImVec2(width, 28.0f));
 }
 
 static void statusText(bool enabled, const char* enabledText, const char* disabledText)
@@ -659,7 +700,6 @@ static void onReshadePresent(effect_runtime* runtime)
 		--g_activeCollectorFrameCounter;
 	}
 
-	// Stable per-group toggle handling using rising edge + debounce
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
@@ -916,13 +956,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		g_keyCollector.collectKeysPressed(runtime);
 	}
 
-	ImGui::SetWindowFontScale(1.06f);
+	ImGui::SetWindowFontScale(1.03f);
 
-	drawSectionTitle("Shader Toggler", "Create groups, assign hotkeys, hunt shaders, and toggle them in-game.");
+	drawSectionTitle("Shader Toggler", "Compact group view with realistic relative cost estimates.");
 
 	if (ImGui::CollapsingHeader("Quick Help", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		ImGui::TextWrapped("Hotkeys while hunting:");
+		ImGui::TextWrapped("Hunt hotkeys:");
 		ImGui::BulletText("1 / 2 = Prev / Next pixel");
 		ImGui::BulletText("Ctrl + 1 / 2 = Prev / Next marked pixel");
 		ImGui::BulletText("3 = Mark pixel");
@@ -933,18 +973,18 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::BulletText("Ctrl + 7 / 8 = Prev / Next marked compute");
 		ImGui::BulletText("9 = Mark compute");
 		ImGui::Separator();
-		ImGui::TextWrapped("Hold 1 / 2 / 4 / 5 / 7 / 8 to scroll faster over time.");
+		ImGui::TextWrapped("Hold 1 / 2 / 4 / 5 / 7 / 8 to accelerate scrolling.");
 	}
 
 	drawSectionTitle("Settings");
 
-	ImGui::PushItemWidth(260.0f);
+	ImGui::PushItemWidth(220.0f);
 	ImGui::TextUnformatted("Overlay");
-	ImGui::SameLine(140.0f);
+	ImGui::SameLine(110.0f);
 	ImGui::SliderFloat("##OverlayOpacity", &g_overlayOpacity, 0.01f, 1.0f);
 
-	ImGui::TextUnformatted("Collect frames");
-	ImGui::SameLine(140.0f);
+	ImGui::TextUnformatted("Collect");
+	ImGui::SameLine(110.0f);
 	ImGui::SliderInt("##CollectFrames", &g_startValueFramecountCollectionPhase, 10, 1000);
 	ImGui::SameLine();
 	showHelpMarker("Increase this if the shader appears only sometimes.");
@@ -952,7 +992,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 	drawSectionTitle("Groups");
 
-	if (bigButton("New Group", 140.0f))
+	if (compactButton("New Group", 120.0f))
 	{
 		addDefaultGroup();
 	}
@@ -965,9 +1005,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	{
 		ImGui::PushID(group.getId());
 
-		ImGui::BeginChild("##GroupCard", ImVec2(0, group.isEditing() ? 210.0f : 78.0f), true);
+		const float groupHeight = group.isEditing() ? 168.0f : 76.0f;
+		ImGui::BeginChild("##GroupCard", ImVec2(0, groupHeight), true);
 
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 8.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 5.0f));
 
 		ImGui::Text("%s", group.getName().c_str());
 		ImGui::SameLine();
@@ -975,25 +1016,47 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::Text("ID %d", group.getId());
 		ImGui::PopStyleColor();
 
-		ImGui::Text("Hotkey: %s", group.getToggleKeyAsString().c_str());
 		ImGui::SameLine();
-		statusText(group.isActive(), "Active", "Inactive");
-
 		if (group.isActiveAtStartup())
 		{
-			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.84f, 1.0f, 1.0f));
 			ImGui::TextUnformatted("Startup");
 			ImGui::PopStyleColor();
 		}
 
-		if (bigButton("Edit", 90.0f))
+		ImGui::Text("Hotkey: %s", group.getToggleKeyAsString().c_str());
+		ImGui::SameLine();
+		statusText(group.isActive(), "Active", "Inactive");
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+
+		ImGui::SameLine();
+		ImGui::Text("Shaders: %d", getGroupShaderCount(group));
+
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+
+		ImGui::SameLine();
+		ImGui::TextUnformatted("Cost:");
+		ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Text, getGroupCostColor(group));
+		ImGui::TextUnformatted(getGroupCostLabel(group));
+		ImGui::PopStyleColor();
+
+		ImGui::SameLine();
+		showHelpMarker(
+			"Relative cost estimate only.\n"
+			"It is based on how many shaders this group blocks and whether compute shaders are involved.\n"
+			"It is not an FPS prediction.");
+
+		if (compactButton("Edit", 70.0f))
 		{
 			group.setEditing(true);
 		}
 		ImGui::SameLine();
 
-		if (bigButton("Duplicate", 110.0f))
+		if (compactButton("Duplicate", 90.0f))
 		{
 			g_toggleGroups.push_back(group.makeDuplicate());
 			saveShaderTogglerIniFile();
@@ -1004,7 +1067,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		{
 			if (g_toggleGroupIdShaderEditing == group.getId())
 			{
-				if (bigButton("Done", 90.0f))
+				if (compactButton("Done", 70.0f))
 				{
 					endShaderEditing(true, group);
 				}
@@ -1012,20 +1075,20 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			else
 			{
 				ImGui::BeginDisabled(true);
-				bigButton("Busy", 90.0f);
+				compactButton("Busy", 70.0f);
 				ImGui::EndDisabled();
 			}
 		}
 		else
 		{
-			if (bigButton("Change Shaders", 140.0f))
+			if (compactButton("Change Shaders", 125.0f))
 			{
 				startShaderEditing(group);
 			}
 		}
 		ImGui::SameLine();
 
-		if (bigButton("Delete", 90.0f))
+		if (compactButton("Delete", 70.0f))
 		{
 			idsToRemove.push_back(group.getId());
 		}
@@ -1037,19 +1100,26 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			char tmpBuffer[150] = {};
 			strncpy_s(tmpBuffer, sizeof(tmpBuffer), group.getName().c_str(), _TRUNCATE);
 
+			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted("Name");
-			ImGui::SetNextItemWidth(280.0f);
+			ImGui::SameLine(70.0f);
+			ImGui::SetNextItemWidth(230.0f);
 			ImGui::InputText("##Name", tmpBuffer, 149);
 			group.setName(tmpBuffer);
 
 			bool isKeyEditing = false;
 
+			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted("Hotkey");
-			std::string textBoxContents = (g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();
+			ImGui::SameLine(70.0f);
+
+			std::string textBoxContents =
+				(g_toggleGroupIdKeyBindingEditing == group.getId()) ? g_keyCollector.getKeyAsString() : group.getToggleKeyAsString();
 
 			char keyBuf[128] = {};
 			strncpy_s(keyBuf, sizeof(keyBuf), textBoxContents.c_str(), _TRUNCATE);
-			ImGui::SetNextItemWidth(220.0f);
+
+			ImGui::SetNextItemWidth(180.0f);
 			ImGui::InputText("##KeyShortcut", keyBuf, sizeof(keyBuf), ImGuiInputTextFlags_ReadOnly);
 
 			if (ImGui::IsItemClicked())
@@ -1061,12 +1131,12 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				isKeyEditing = true;
 				ImGui::SameLine();
-				if (bigButton("OK", 70.0f))
+				if (compactButton("OK", 50.0f))
 				{
 					endKeyBindingEditing(true, group);
 				}
 				ImGui::SameLine();
-				if (bigButton("Cancel", 80.0f))
+				if (compactButton("Cancel", 70.0f))
 				{
 					endKeyBindingEditing(false, group);
 				}
@@ -1078,7 +1148,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 			if (!isKeyEditing)
 			{
-				if (bigButton("Save Changes", 150.0f))
+				if (compactButton("Save Changes", 130.0f))
 				{
 					group.setEditing(false);
 					g_toggleGroupIdKeyBindingEditing = -1;
@@ -1124,18 +1194,18 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (!g_toggleGroups.empty())
 	{
 		ImGui::Spacing();
-		if (bigButton("Save All", 120.0f))
+		if (compactButton("Save All", 100.0f))
 		{
 			saveShaderTogglerIniFile();
 		}
 	}
 
-	drawSectionTitle("Order");
+	drawSectionTitle("Order", "Drag groups to reorder them.");
 
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 6.0f));
 
-	float computedHeight = 44.0f * static_cast<float>(g_toggleGroups.size()) + 16.0f;
-	float childHeight = (computedHeight < 500.0f) ? computedHeight : 500.0f;
+	float computedHeight = 38.0f * static_cast<float>(g_toggleGroups.size()) + 12.0f;
+	float childHeight = (computedHeight < 360.0f) ? computedHeight : 360.0f;
 	ImGui::BeginChild("##grouporder_inline", ImVec2(0, childHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); ++i)
@@ -1143,7 +1213,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::PushID(i);
 
 		const std::string &name = g_toggleGroups[i].getName();
-		ImGui::Selectable(name.c_str(), false, 0, ImVec2(0.0f, 28.0f));
+		ImGui::Selectable(name.c_str(), false, 0, ImVec2(0.0f, 24.0f));
 
 		if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
 		{

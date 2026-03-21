@@ -12,14 +12,7 @@ namespace ShaderToggler
 	static ToggleGroup::GroupId s_nextGroupId = 1;
 
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
-		: m_id(id),
-		  m_name(name),
-		  m_active(false),
-		  m_activeAtStartup(false),
-		  m_editing(false),
-		  m_passMatchMode(PassMatchMode::Balanced),
-		  m_pipelineOnlyMatchViewport(false),
-		  m_pipelineOnlyMatchRenderTarget(false)
+		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_passMatchMode(PassMatchMode::Balanced)
 	{
 	}
 
@@ -73,26 +66,6 @@ namespace ShaderToggler
 		m_passMatchMode = mode;
 	}
 
-	bool ToggleGroup::getPipelineOnlyMatchViewport() const
-	{
-		return m_pipelineOnlyMatchViewport;
-	}
-
-	void ToggleGroup::setPipelineOnlyMatchViewport(bool value)
-	{
-		m_pipelineOnlyMatchViewport = value;
-	}
-
-	bool ToggleGroup::getPipelineOnlyMatchRenderTarget() const
-	{
-		return m_pipelineOnlyMatchRenderTarget;
-	}
-
-	void ToggleGroup::setPipelineOnlyMatchRenderTarget(bool value)
-	{
-		m_pipelineOnlyMatchRenderTarget = value;
-	}
-
 	void ToggleGroup::clearHashes()
 	{
 		m_pixelShaderHashes.clear();
@@ -144,8 +117,6 @@ namespace ShaderToggler
 		clearHashes();
 		clearPassSignatures();
 		m_passMatchMode = PassMatchMode::Balanced;
-		m_pipelineOnlyMatchViewport = false;
-		m_pipelineOnlyMatchRenderTarget = false;
 
 		if (index < 0)
 		{
@@ -238,15 +209,6 @@ namespace ShaderToggler
 						static_cast<uint64_t>(pipelineLo);
 				}
 
-				uint32_t computeLo = iniFile.GetUInt(keyPrefix + "_ComputeLo", passesCategory);
-				uint32_t computeHi = iniFile.GetUInt(keyPrefix + "_ComputeHi", passesCategory);
-				if (computeLo != UINT_MAX && computeHi != UINT_MAX)
-				{
-					sig.computePipeline =
-						(static_cast<uint64_t>(computeHi) << 32) |
-						static_cast<uint64_t>(computeLo);
-				}
-
 				uint32_t rtvLo = iniFile.GetUInt(keyPrefix + "_RTVLo", passesCategory);
 				uint32_t rtvHi = iniFile.GetUInt(keyPrefix + "_RTVHi", passesCategory);
 				if (rtvLo != UINT_MAX && rtvHi != UINT_MAX)
@@ -255,6 +217,46 @@ namespace ShaderToggler
 						(static_cast<uint64_t>(rtvHi) << 32) |
 						static_cast<uint64_t>(rtvLo);
 				}
+
+				uint32_t layoutLo = iniFile.GetUInt(keyPrefix + "_LayoutLo", passesCategory);
+				uint32_t layoutHi = iniFile.GetUInt(keyPrefix + "_LayoutHi", passesCategory);
+				if (layoutLo != UINT_MAX && layoutHi != UINT_MAX)
+				{
+					sig.pipelineLayout =
+						(static_cast<uint64_t>(layoutHi) << 32) |
+						static_cast<uint64_t>(layoutLo);
+				}
+
+				uint32_t descLo = iniFile.GetUInt(keyPrefix + "_DescSigLo", passesCategory);
+				uint32_t descHi = iniFile.GetUInt(keyPrefix + "_DescSigHi", passesCategory);
+				if (descLo != UINT_MAX && descHi != UINT_MAX)
+				{
+					sig.descriptorSignature =
+						(static_cast<uint64_t>(descHi) << 32) |
+						static_cast<uint64_t>(descLo);
+				}
+
+				uint32_t pushLo = iniFile.GetUInt(keyPrefix + "_PushSigLo", passesCategory);
+				uint32_t pushHi = iniFile.GetUInt(keyPrefix + "_PushSigHi", passesCategory);
+				if (pushLo != UINT_MAX && pushHi != UINT_MAX)
+				{
+					sig.pushConstantSignature =
+						(static_cast<uint64_t>(pushHi) << 32) |
+						static_cast<uint64_t>(pushLo);
+				}
+
+				const std::string computeValue = iniFile.GetValue(keyPrefix + "_IsCompute", passesCategory);
+				if (!computeValue.empty())
+					sig.isCompute = iniFile.GetBool(keyPrefix + "_IsCompute", passesCategory);
+
+				uint32_t uintValue = iniFile.GetUInt(keyPrefix + "_DispatchX", passesCategory);
+				if (uintValue != UINT_MAX) sig.dispatchX = uintValue;
+
+				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchY", passesCategory);
+				if (uintValue != UINT_MAX) sig.dispatchY = uintValue;
+
+				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchZ", passesCategory);
+				if (uintValue != UINT_MAX) sig.dispatchZ = uintValue;
 
 				const std::string hasViewportValue = iniFile.GetValue(keyPrefix + "_HasViewport", passesCategory);
 				if (!hasViewportValue.empty())
@@ -272,30 +274,17 @@ namespace ShaderToggler
 				value = iniFile.GetFloat(keyPrefix + "_ViewportH", passesCategory);
 				if (value != FLT_MIN) sig.viewportHeight = value;
 
-				uint32_t uintValue = iniFile.GetUInt(keyPrefix + "_Vertices", passesCategory);
+				uintValue = iniFile.GetUInt(keyPrefix + "_Vertices", passesCategory);
 				if (uintValue != UINT_MAX) sig.vertices = uintValue;
 
 				uintValue = iniFile.GetUInt(keyPrefix + "_Indices", passesCategory);
 				if (uintValue != UINT_MAX) sig.indices = uintValue;
 
-				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchX", passesCategory);
-				if (uintValue != UINT_MAX) sig.dispatchX = uintValue;
-
-				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchY", passesCategory);
-				if (uintValue != UINT_MAX) sig.dispatchY = uintValue;
-
-				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchZ", passesCategory);
-				if (uintValue != UINT_MAX) sig.dispatchZ = uintValue;
-
 				const std::string indexedValue = iniFile.GetValue(keyPrefix + "_Indexed", passesCategory);
 				if (!indexedValue.empty())
 					sig.indexed = iniFile.GetBool(keyPrefix + "_Indexed", passesCategory);
 
-				const std::string computeValue = iniFile.GetValue(keyPrefix + "_IsCompute", passesCategory);
-				if (!computeValue.empty())
-					sig.isCompute = iniFile.GetBool(keyPrefix + "_IsCompute", passesCategory);
-
-				if (sig.pixelPipeline != 0 || sig.computePipeline != 0)
+				if (sig.pixelPipeline != 0 || sig.isCompute)
 					m_passSignatures.push_back(sig);
 			}
 		}
@@ -312,7 +301,7 @@ namespace ShaderToggler
 
 		const int passMatchModeValue = iniFile.GetInt("PassMatchMode", sectionRoot);
 		if (passMatchModeValue >= static_cast<int>(PassMatchMode::Exact) &&
-			passMatchModeValue <= static_cast<int>(PassMatchMode::PipelineOnly))
+			passMatchModeValue <= static_cast<int>(PassMatchMode::Loose))
 		{
 			m_passMatchMode = static_cast<PassMatchMode>(passMatchModeValue);
 		}
@@ -320,14 +309,6 @@ namespace ShaderToggler
 		{
 			m_passMatchMode = PassMatchMode::Balanced;
 		}
-
-		const std::string matchViewportValue = iniFile.GetValue("PipelineOnlyMatchViewport", sectionRoot);
-		if (!matchViewportValue.empty())
-			m_pipelineOnlyMatchViewport = iniFile.GetBool("PipelineOnlyMatchViewport", sectionRoot);
-
-		const std::string matchRTValue = iniFile.GetValue("PipelineOnlyMatchRenderTarget", sectionRoot);
-		if (!matchRTValue.empty())
-			m_pipelineOnlyMatchRenderTarget = iniFile.GetBool("PipelineOnlyMatchRenderTarget", sectionRoot);
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
@@ -373,10 +354,20 @@ namespace ShaderToggler
 
 			iniFile.SetUInt(keyPrefix + "_PipelineLo", static_cast<uint32_t>(pass.pixelPipeline & 0xFFFFFFFFull), "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_PipelineHi", static_cast<uint32_t>((pass.pixelPipeline >> 32) & 0xFFFFFFFFull), "", passesCategory);
-			iniFile.SetUInt(keyPrefix + "_ComputeLo", static_cast<uint32_t>(pass.computePipeline & 0xFFFFFFFFull), "", passesCategory);
-			iniFile.SetUInt(keyPrefix + "_ComputeHi", static_cast<uint32_t>((pass.computePipeline >> 32) & 0xFFFFFFFFull), "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_RTVLo", static_cast<uint32_t>(pass.renderTargetView & 0xFFFFFFFFull), "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_RTVHi", static_cast<uint32_t>((pass.renderTargetView >> 32) & 0xFFFFFFFFull), "", passesCategory);
+
+			iniFile.SetUInt(keyPrefix + "_LayoutLo", static_cast<uint32_t>(pass.pipelineLayout & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_LayoutHi", static_cast<uint32_t>((pass.pipelineLayout >> 32) & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DescSigLo", static_cast<uint32_t>(pass.descriptorSignature & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DescSigHi", static_cast<uint32_t>((pass.descriptorSignature >> 32) & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_PushSigLo", static_cast<uint32_t>(pass.pushConstantSignature & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_PushSigHi", static_cast<uint32_t>((pass.pushConstantSignature >> 32) & 0xFFFFFFFFull), "", passesCategory);
+
+			iniFile.SetBool(keyPrefix + "_IsCompute", pass.isCompute, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DispatchX", pass.dispatchX, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DispatchY", pass.dispatchY, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DispatchZ", pass.dispatchZ, "", passesCategory);
 
 			iniFile.SetBool(keyPrefix + "_HasViewport", pass.hasViewport, "", passesCategory);
 			iniFile.SetFloat(keyPrefix + "_ViewportX", pass.viewportX, "", passesCategory);
@@ -386,12 +377,7 @@ namespace ShaderToggler
 
 			iniFile.SetUInt(keyPrefix + "_Vertices", pass.vertices, "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_Indices", pass.indices, "", passesCategory);
-			iniFile.SetUInt(keyPrefix + "_DispatchX", pass.dispatchX, "", passesCategory);
-			iniFile.SetUInt(keyPrefix + "_DispatchY", pass.dispatchY, "", passesCategory);
-			iniFile.SetUInt(keyPrefix + "_DispatchZ", pass.dispatchZ, "", passesCategory);
-
 			iniFile.SetBool(keyPrefix + "_Indexed", pass.indexed, "", passesCategory);
-			iniFile.SetBool(keyPrefix + "_IsCompute", pass.isCompute, "", passesCategory);
 
 			counter++;
 		}
@@ -401,7 +387,5 @@ namespace ShaderToggler
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetInt("PassMatchMode", static_cast<int>(m_passMatchMode), "", sectionRoot);
-		iniFile.SetBool("PipelineOnlyMatchViewport", m_pipelineOnlyMatchViewport, "", sectionRoot);
-		iniFile.SetBool("PipelineOnlyMatchRenderTarget", m_pipelineOnlyMatchRenderTarget, "", sectionRoot);
 	}
 }

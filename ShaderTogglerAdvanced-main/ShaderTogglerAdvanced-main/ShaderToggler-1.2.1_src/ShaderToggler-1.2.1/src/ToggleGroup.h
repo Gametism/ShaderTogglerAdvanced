@@ -13,28 +13,33 @@ namespace ShaderToggler
 	struct PassSignature
 	{
 		uint64_t pixelPipeline = 0;
-		uint64_t computePipeline = 0;
 		uint64_t renderTargetView = 0;
+
+		uint64_t pipelineLayout = 0;
+		uint64_t descriptorSignature = 0;
+		uint64_t pushConstantSignature = 0;
+
+		bool isCompute = false;
+		uint32_t dispatchX = 0;
+		uint32_t dispatchY = 0;
+		uint32_t dispatchZ = 0;
+
 		bool hasViewport = false;
 		float viewportX = 0.0f;
 		float viewportY = 0.0f;
 		float viewportWidth = 0.0f;
 		float viewportHeight = 0.0f;
+
 		uint32_t vertices = 0;
 		uint32_t indices = 0;
-		uint32_t dispatchX = 0;
-		uint32_t dispatchY = 0;
-		uint32_t dispatchZ = 0;
 		bool indexed = false;
-		bool isCompute = false;
 	};
 
 	enum class PassMatchMode : int
 	{
 		Exact = 0,
 		Balanced = 1,
-		Loose = 2,
-		PipelineOnly = 3
+		Loose = 2
 	};
 
 	class ToggleGroup
@@ -70,12 +75,6 @@ namespace ShaderToggler
 		PassMatchMode getPassMatchMode() const;
 		void setPassMatchMode(PassMatchMode mode);
 
-		bool getPipelineOnlyMatchViewport() const;
-		void setPipelineOnlyMatchViewport(bool value);
-
-		bool getPipelineOnlyMatchRenderTarget() const;
-		void setPipelineOnlyMatchRenderTarget(bool value);
-
 		void clearHashes();
 		void storeCollectedHashes(
 			const std::unordered_set<uint32_t>& pixel,
@@ -103,8 +102,6 @@ namespace ShaderToggler
 		bool m_editing = false;
 		KeyData m_toggleKey;
 		PassMatchMode m_passMatchMode = PassMatchMode::Balanced;
-		bool m_pipelineOnlyMatchViewport = false;
-		bool m_pipelineOnlyMatchRenderTarget = false;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;

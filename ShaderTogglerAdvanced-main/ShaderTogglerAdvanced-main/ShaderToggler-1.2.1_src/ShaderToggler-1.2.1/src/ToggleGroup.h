@@ -13,6 +13,7 @@ namespace ShaderToggler
 	struct PassSignature
 	{
 		uint64_t pixelPipeline = 0;
+		uint64_t computePipeline = 0;
 		uint64_t renderTargetView = 0;
 		bool hasViewport = false;
 		float viewportX = 0.0f;
@@ -21,7 +22,11 @@ namespace ShaderToggler
 		float viewportHeight = 0.0f;
 		uint32_t vertices = 0;
 		uint32_t indices = 0;
+		uint32_t dispatchX = 0;
+		uint32_t dispatchY = 0;
+		uint32_t dispatchZ = 0;
 		bool indexed = false;
+		bool isCompute = false;
 	};
 
 	enum class PassMatchMode : int

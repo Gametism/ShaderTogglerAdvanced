@@ -147,7 +147,6 @@ namespace ShaderToggler
 			m_name = "Default";
 			m_activeAtStartup = false;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
-			m_passMatchMode = PassMatchMode::Balanced;
 			m_active = m_activeAtStartup;
 			return;
 		}
@@ -210,6 +209,15 @@ namespace ShaderToggler
 						static_cast<uint64_t>(pipelineLo);
 				}
 
+				uint32_t computeLo = iniFile.GetUInt(keyPrefix + "_ComputeLo", passesCategory);
+				uint32_t computeHi = iniFile.GetUInt(keyPrefix + "_ComputeHi", passesCategory);
+				if (computeLo != UINT_MAX && computeHi != UINT_MAX)
+				{
+					sig.computePipeline =
+						(static_cast<uint64_t>(computeHi) << 32) |
+						static_cast<uint64_t>(computeLo);
+				}
+
 				uint32_t rtvLo = iniFile.GetUInt(keyPrefix + "_RTVLo", passesCategory);
 				uint32_t rtvHi = iniFile.GetUInt(keyPrefix + "_RTVHi", passesCategory);
 				if (rtvLo != UINT_MAX && rtvHi != UINT_MAX)
@@ -241,11 +249,24 @@ namespace ShaderToggler
 				uintValue = iniFile.GetUInt(keyPrefix + "_Indices", passesCategory);
 				if (uintValue != UINT_MAX) sig.indices = uintValue;
 
+				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchX", passesCategory);
+				if (uintValue != UINT_MAX) sig.dispatchX = uintValue;
+
+				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchY", passesCategory);
+				if (uintValue != UINT_MAX) sig.dispatchY = uintValue;
+
+				uintValue = iniFile.GetUInt(keyPrefix + "_DispatchZ", passesCategory);
+				if (uintValue != UINT_MAX) sig.dispatchZ = uintValue;
+
 				const std::string indexedValue = iniFile.GetValue(keyPrefix + "_Indexed", passesCategory);
 				if (!indexedValue.empty())
 					sig.indexed = iniFile.GetBool(keyPrefix + "_Indexed", passesCategory);
 
-				if (sig.pixelPipeline != 0)
+				const std::string computeValue = iniFile.GetValue(keyPrefix + "_IsCompute", passesCategory);
+				if (!computeValue.empty())
+					sig.isCompute = iniFile.GetBool(keyPrefix + "_IsCompute", passesCategory);
+
+				if (sig.pixelPipeline != 0 || sig.computePipeline != 0)
 					m_passSignatures.push_back(sig);
 			}
 		}
@@ -315,6 +336,8 @@ namespace ShaderToggler
 
 			iniFile.SetUInt(keyPrefix + "_PipelineLo", static_cast<uint32_t>(pass.pixelPipeline & 0xFFFFFFFFull), "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_PipelineHi", static_cast<uint32_t>((pass.pixelPipeline >> 32) & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_ComputeLo", static_cast<uint32_t>(pass.computePipeline & 0xFFFFFFFFull), "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_ComputeHi", static_cast<uint32_t>((pass.computePipeline >> 32) & 0xFFFFFFFFull), "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_RTVLo", static_cast<uint32_t>(pass.renderTargetView & 0xFFFFFFFFull), "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_RTVHi", static_cast<uint32_t>((pass.renderTargetView >> 32) & 0xFFFFFFFFull), "", passesCategory);
 
@@ -326,7 +349,12 @@ namespace ShaderToggler
 
 			iniFile.SetUInt(keyPrefix + "_Vertices", pass.vertices, "", passesCategory);
 			iniFile.SetUInt(keyPrefix + "_Indices", pass.indices, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DispatchX", pass.dispatchX, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DispatchY", pass.dispatchY, "", passesCategory);
+			iniFile.SetUInt(keyPrefix + "_DispatchZ", pass.dispatchZ, "", passesCategory);
+
 			iniFile.SetBool(keyPrefix + "_Indexed", pass.indexed, "", passesCategory);
+			iniFile.SetBool(keyPrefix + "_IsCompute", pass.isCompute, "", passesCategory);
 
 			counter++;
 		}

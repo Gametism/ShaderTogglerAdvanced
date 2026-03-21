@@ -37,7 +37,6 @@
 #include <unordered_map>
 #include <cmath>
 #include <cfloat>
-#include <cstddef>
 
 #ifdef min
 #undef min
@@ -63,6 +62,11 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	uint32_t lastVertexCount;
 	uint32_t lastIndexCount;
 	bool lastDrawIndexed;
+
+	uint32_t lastDispatchX;
+	uint32_t lastDispatchY;
+	uint32_t lastDispatchZ;
+	bool lastWasDispatch;
 
 	uint64_t currentRenderTargetView;
 	bool hasViewport;
@@ -143,12 +147,8 @@ static std::vector<GroupPassSignature> g_passCandidates;
 static int g_activePassCandidateIndex = -1;
 static bool g_previewCurrentPass = true;
 
-// Crash-safe pass collection controls
-static bool g_collectOnlyLikelyPostProcessPasses = true;
-static bool g_ignoreRenderTargetWhenCollectingPasses = true;
-static bool g_ignoreSmallViewportPasses = true;
-static bool g_passCandidateLimitReached = false;
-static int g_maxPassCandidates = 2048;
+// Simple UX toggle
+static bool g_showAdvancedTools = false;
 
 static bool is_key_down_numpad_or_nav(reshade::api::effect_runtime* runtime, int vk_numpad, int vk_nav)
 {
@@ -223,12 +223,17 @@ static std::vector<GroupPassSignature>* getEditingPassList()
 
 static bool passSignaturesEqual(const GroupPassSignature& a, const GroupPassSignature& b)
 {
+	if (a.isCompute != b.isCompute) return false;
 	if (a.pixelPipeline != b.pixelPipeline) return false;
+	if (a.computePipeline != b.computePipeline) return false;
 	if (a.renderTargetView != b.renderTargetView) return false;
 	if (a.hasViewport != b.hasViewport) return false;
 	if (a.indexed != b.indexed) return false;
 	if (a.vertices != b.vertices) return false;
 	if (a.indices != b.indices) return false;
+	if (a.dispatchX != b.dispatchX) return false;
+	if (a.dispatchY != b.dispatchY) return false;
+	if (a.dispatchZ != b.dispatchZ) return false;
 
 	if (a.hasViewport)
 	{
@@ -243,6 +248,37 @@ static bool passSignaturesEqual(const GroupPassSignature& a, const GroupPassSign
 
 static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSignature& current, PassMatchMode mode)
 {
+	if (stored.isCompute != current.isCompute)
+		return false;
+
+	if (stored.isCompute)
+	{
+		if (stored.computePipeline == 0 || current.computePipeline == 0)
+			return false;
+
+		if (stored.computePipeline != current.computePipeline)
+			return false;
+
+		switch (mode)
+		{
+		case PassMatchMode::Exact:
+			return stored.dispatchX == current.dispatchX &&
+				   stored.dispatchY == current.dispatchY &&
+				   stored.dispatchZ == current.dispatchZ;
+
+		case PassMatchMode::Balanced:
+			return countNearlyEqual(stored.dispatchX, current.dispatchX, 1) &&
+				   countNearlyEqual(stored.dispatchY, current.dispatchY, 1) &&
+				   countNearlyEqual(stored.dispatchZ, current.dispatchZ, 1);
+
+		case PassMatchMode::Loose:
+			return true;
+
+		default:
+			return false;
+		}
+	}
+
 	if (stored.pixelPipeline == 0 || current.pixelPipeline == 0)
 		return false;
 
@@ -300,9 +336,7 @@ static bool passMatchesMode(const GroupPassSignature& stored, const GroupPassSig
 	}
 
 	case PassMatchMode::Loose:
-	{
 		return true;
-	}
 
 	default:
 		return false;
@@ -353,75 +387,6 @@ static const char* passMatchModeToString(PassMatchMode mode)
 	}
 }
 
-static bool isFullscreenLikeGeometry(const GroupPassSignature& sig)
-{
-	if (sig.indexed)
-		return sig.indices >= 3 && sig.indices <= 12;
-
-	return sig.vertices >= 3 && sig.vertices <= 6;
-}
-
-static bool viewportLooksLargeEnoughForPostFx(const GroupPassSignature& sig)
-{
-	if (!sig.hasViewport)
-		return true;
-
-	if (g_seenMaxViewportWidth <= 1.0f || g_seenMaxViewportHeight <= 1.0f)
-		return true;
-
-	const float wRatio = sig.viewportWidth / g_seenMaxViewportWidth;
-	const float hRatio = sig.viewportHeight / g_seenMaxViewportHeight;
-
-	return (wRatio >= 0.70f && hRatio >= 0.70f);
-}
-
-static bool isLikelyUsefulPassCandidate(const GroupPassSignature& sig)
-{
-	if (sig.pixelPipeline == 0 || sig.pixelPipeline == static_cast<uint64_t>(-1))
-		return false;
-
-	if (!g_collectOnlyLikelyPostProcessPasses)
-		return true;
-
-	if (g_ignoreSmallViewportPasses && !viewportLooksLargeEnoughForPostFx(sig))
-		return false;
-
-	if (isFullscreenLikeGeometry(sig))
-		return true;
-
-	// Keep some larger post-process style draws too
-	if (sig.indexed)
-		return sig.indices > 0 && sig.indices <= 128;
-
-	return sig.vertices > 0 && sig.vertices <= 64;
-}
-
-static bool passCandidatesEquivalent(const GroupPassSignature& a, const GroupPassSignature& b)
-{
-	if (a.pixelPipeline != b.pixelPipeline)
-		return false;
-
-	if (a.indexed != b.indexed)
-		return false;
-
-	if (a.hasViewport && b.hasViewport)
-	{
-		if (!floatNearlyEqual(a.viewportWidth, b.viewportWidth, 2.0f)) return false;
-		if (!floatNearlyEqual(a.viewportHeight, b.viewportHeight, 2.0f)) return false;
-	}
-
-	if (!g_ignoreRenderTargetWhenCollectingPasses)
-	{
-		if (a.renderTargetView != b.renderTargetView)
-			return false;
-	}
-
-	if (a.indexed)
-		return countNearlyEqual(a.indices, b.indices, 2);
-
-	return countNearlyEqual(a.vertices, b.vertices, 2);
-}
-
 static std::string buildIniSignature()
 {
 	std::string data;
@@ -446,7 +411,9 @@ static std::string buildIniSignature()
 
 		for (const auto& pass : group.getPassSignatures())
 		{
+			data += "|PIC=" + std::to_string(pass.isCompute ? 1 : 0);
 			data += "|PP=" + std::to_string(static_cast<unsigned long long>(pass.pixelPipeline));
+			data += "|CP=" + std::to_string(static_cast<unsigned long long>(pass.computePipeline));
 			data += "|PR=" + std::to_string(static_cast<unsigned long long>(pass.renderTargetView));
 			data += "|PHV=" + std::to_string(pass.hasViewport ? 1 : 0);
 			data += "|PVX=" + std::to_string(pass.viewportX);
@@ -455,6 +422,9 @@ static std::string buildIniSignature()
 			data += "|PVH=" + std::to_string(pass.viewportHeight);
 			data += "|PVT=" + std::to_string(pass.vertices);
 			data += "|PIN=" + std::to_string(pass.indices);
+			data += "|PDX=" + std::to_string(pass.dispatchX);
+			data += "|PDY=" + std::to_string(pass.dispatchY);
+			data += "|PDZ=" + std::to_string(pass.dispatchZ);
 			data += "|PIDX=" + std::to_string(pass.indexed ? 1 : 0);
 		}
 	}
@@ -469,7 +439,9 @@ static std::string buildIniSignature()
 	data += "|MatchCapturedPassViewport=" + std::to_string(g_matchCapturedPassViewport ? 1 : 0);
 	data += "|MatchCapturedPassRenderTarget=" + std::to_string(g_matchCapturedPassRenderTarget ? 1 : 0);
 
+	data += "|CapturedIsCompute=" + std::to_string(g_capturedPass.isCompute ? 1 : 0);
 	data += "|CapturedPipeline=" + std::to_string(static_cast<unsigned long long>(g_capturedPass.pixelPipeline));
+	data += "|CapturedCompute=" + std::to_string(static_cast<unsigned long long>(g_capturedPass.computePipeline));
 	data += "|CapturedRTV=" + std::to_string(static_cast<unsigned long long>(g_capturedPass.renderTargetView));
 	data += "|CapturedHasViewport=" + std::to_string(g_capturedPass.hasViewport ? 1 : 0);
 	data += "|CapturedVPX=" + std::to_string(g_capturedPass.viewportX);
@@ -478,6 +450,9 @@ static std::string buildIniSignature()
 	data += "|CapturedVPH=" + std::to_string(g_capturedPass.viewportHeight);
 	data += "|CapturedVertices=" + std::to_string(g_capturedPass.vertices);
 	data += "|CapturedIndices=" + std::to_string(g_capturedPass.indices);
+	data += "|CapturedDispatchX=" + std::to_string(g_capturedPass.dispatchX);
+	data += "|CapturedDispatchY=" + std::to_string(g_capturedPass.dispatchY);
+	data += "|CapturedDispatchZ=" + std::to_string(g_capturedPass.dispatchZ);
 	data += "|CapturedIndexed=" + std::to_string(g_capturedPass.indexed ? 1 : 0);
 
 	data += "|BlockLikelyCornerUiPasses=" + std::to_string(g_blockLikelyCornerUiPasses ? 1 : 0);
@@ -485,11 +460,6 @@ static std::string buildIniSignature()
 	data += "|CornerUiMaxWidthRatio=" + std::to_string(g_cornerUiMaxWidthRatio);
 	data += "|CornerUiMaxHeightRatio=" + std::to_string(g_cornerUiMaxHeightRatio);
 	data += "|CornerUiEdgeToleranceRatio=" + std::to_string(g_cornerUiEdgeToleranceRatio);
-
-	data += "|CollectOnlyLikelyPostProcessPasses=" + std::to_string(g_collectOnlyLikelyPostProcessPasses ? 1 : 0);
-	data += "|IgnoreRenderTargetWhenCollectingPasses=" + std::to_string(g_ignoreRenderTargetWhenCollectingPasses ? 1 : 0);
-	data += "|IgnoreSmallViewportPasses=" + std::to_string(g_ignoreSmallViewportPasses ? 1 : 0);
-	data += "|MaxPassCandidates=" + std::to_string(g_maxPassCandidates);
 
 	return toHex64(fnv1a64(data));
 }
@@ -550,7 +520,7 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
-static GroupPassSignature buildCurrentPassSignature(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+static GroupPassSignature buildCurrentDrawPassSignature(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
 	GroupPassSignature sig{};
 
@@ -559,7 +529,9 @@ static GroupPassSignature buildCurrentPassSignature(command_list* commandList, u
 
 	const CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
 
+	sig.isCompute = false;
 	sig.pixelPipeline = data.activePixelShaderPipeline;
+	sig.computePipeline = 0;
 	sig.renderTargetView = data.currentRenderTargetView;
 	sig.hasViewport = data.hasViewport;
 	sig.viewportX = data.viewportX;
@@ -569,6 +541,34 @@ static GroupPassSignature buildCurrentPassSignature(command_list* commandList, u
 	sig.vertices = vertex_count;
 	sig.indices = index_count;
 	sig.indexed = indexed;
+
+	return sig;
+}
+
+static GroupPassSignature buildCurrentDispatchPassSignature(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	GroupPassSignature sig{};
+
+	if (commandList == nullptr)
+		return sig;
+
+	const CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+
+	sig.isCompute = true;
+	sig.pixelPipeline = 0;
+	sig.computePipeline = data.activeComputeShaderPipeline;
+	sig.renderTargetView = 0;
+	sig.hasViewport = false;
+	sig.viewportX = 0.0f;
+	sig.viewportY = 0.0f;
+	sig.viewportWidth = 0.0f;
+	sig.viewportHeight = 0.0f;
+	sig.vertices = 0;
+	sig.indices = 0;
+	sig.dispatchX = group_count_x;
+	sig.dispatchY = group_count_y;
+	sig.dispatchZ = group_count_z;
+	sig.indexed = false;
 
 	return sig;
 }
@@ -600,12 +600,15 @@ static bool isLikelyFullscreenPass(command_list* commandList, uint32_t vertex_co
 	return false;
 }
 
-static bool doesCapturedPassMatch(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+static bool doesCapturedPassMatchDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
 	if (!g_enableCapturedPassBlocker || !g_hasCapturedPass || commandList == nullptr)
 		return false;
 
-	const GroupPassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+	if (g_capturedPass.isCompute)
+		return false;
+
+	const GroupPassSignature current = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
 
 	if (current.pixelPipeline != g_capturedPass.pixelPipeline)
 		return false;
@@ -648,6 +651,24 @@ static bool doesCapturedPassMatch(command_list* commandList, uint32_t vertex_cou
 	}
 
 	return true;
+}
+
+static bool doesCapturedPassMatchDispatch(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	if (!g_enableCapturedPassBlocker || !g_hasCapturedPass || commandList == nullptr)
+		return false;
+
+	if (!g_capturedPass.isCompute)
+		return false;
+
+	const GroupPassSignature current = buildCurrentDispatchPassSignature(commandList, group_count_x, group_count_y, group_count_z);
+
+	if (current.computePipeline != g_capturedPass.computePipeline)
+		return false;
+
+	return current.dispatchX == g_capturedPass.dispatchX &&
+	       current.dispatchY == g_capturedPass.dispatchY &&
+	       current.dispatchZ == g_capturedPass.dispatchZ;
 }
 
 static bool isLikelyCornerUiPass(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
@@ -709,70 +730,104 @@ static bool isLikelyCornerUiPass(command_list* commandList, uint32_t vertex_coun
 	return nearCorner && lowComplexity;
 }
 
-static bool isCurrentPreviewPass(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+static bool isCurrentPreviewPassDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
 	if (g_toggleGroupIdPassEditing < 0 || !g_previewCurrentPass)
 		return false;
 	if (g_activePassCandidateIndex < 0 || g_activePassCandidateIndex >= static_cast<int>(g_passCandidates.size()))
 		return false;
 
-	const GroupPassSignature current = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+	const GroupPassSignature current = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
 	return passSignaturesEqual(current, g_passCandidates[g_activePassCandidateIndex]);
 }
 
-static void collectPassCandidate(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
+static bool isCurrentPreviewPassDispatch(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	if (g_toggleGroupIdPassEditing < 0 || !g_previewCurrentPass)
+		return false;
+	if (g_activePassCandidateIndex < 0 || g_activePassCandidateIndex >= static_cast<int>(g_passCandidates.size()))
+		return false;
+
+	const GroupPassSignature current = buildCurrentDispatchPassSignature(commandList, group_count_x, group_count_y, group_count_z);
+	return passSignaturesEqual(current, g_passCandidates[g_activePassCandidateIndex]);
+}
+
+static void collectDrawPassCandidate(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
 	if (g_toggleGroupIdPassEditing < 0 || commandList == nullptr)
 		return;
 
-	if (g_passCandidateLimitReached)
+	const GroupPassSignature sig = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
+
+	if (sig.pixelPipeline == 0 || sig.pixelPipeline == static_cast<uint64_t>(-1))
 		return;
 
-	const GroupPassSignature sig = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
-
-	if (!isLikelyUsefulPassCandidate(sig))
-		return;
-
-	for (const auto& existing : g_passCandidates)
+	if (!passListContains(g_passCandidates, sig))
 	{
-		if (passCandidatesEquivalent(existing, sig))
-			return;
+		g_passCandidates.push_back(sig);
+		if (g_activePassCandidateIndex < 0)
+			g_activePassCandidateIndex = 0;
 	}
+}
 
-	if (static_cast<int>(g_passCandidates.size()) >= g_maxPassCandidates)
-	{
-		g_passCandidateLimitReached = true;
+static void collectDispatchPassCandidate(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	if (g_toggleGroupIdPassEditing < 0 || commandList == nullptr)
 		return;
-	}
 
-	g_passCandidates.push_back(sig);
-	if (g_activePassCandidateIndex < 0)
-		g_activePassCandidateIndex = 0;
+	const GroupPassSignature sig = buildCurrentDispatchPassSignature(commandList, group_count_x, group_count_y, group_count_z);
+
+	if (sig.computePipeline == 0 || sig.computePipeline == static_cast<uint64_t>(-1))
+		return;
+
+	if (!passListContains(g_passCandidates, sig))
+	{
+		g_passCandidates.push_back(sig);
+		if (g_activePassCandidateIndex < 0)
+			g_activePassCandidateIndex = 0;
+	}
 }
 
 static bool blockPassRuleForDraw(command_list* commandList, uint32_t vertex_count, uint32_t index_count, bool indexed)
 {
-	if (isCurrentPreviewPass(commandList, vertex_count, index_count, indexed))
+	if (isCurrentPreviewPassDraw(commandList, vertex_count, index_count, indexed))
 	{
-		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		g_lastBlockedPass = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
 		return true;
 	}
 
-	if (doesCapturedPassMatch(commandList, vertex_count, index_count, indexed))
+	if (doesCapturedPassMatchDraw(commandList, vertex_count, index_count, indexed))
 	{
-		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		g_lastBlockedPass = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
 		return true;
 	}
 
 	if (isLikelyCornerUiPass(commandList, vertex_count, index_count, indexed))
 	{
-		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		g_lastBlockedPass = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
 		return true;
 	}
 
 	if (isLikelyFullscreenPass(commandList, vertex_count, index_count, indexed))
 	{
-		g_lastBlockedPass = buildCurrentPassSignature(commandList, vertex_count, index_count, indexed);
+		g_lastBlockedPass = buildCurrentDrawPassSignature(commandList, vertex_count, index_count, indexed);
+		return true;
+	}
+
+	return false;
+}
+
+static bool blockPassRuleForDispatch(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	if (isCurrentPreviewPassDispatch(commandList, group_count_x, group_count_y, group_count_z))
+	{
+		g_lastBlockedPass = buildCurrentDispatchPassSignature(commandList, group_count_x, group_count_y, group_count_z);
+		return true;
+	}
+
+	if (doesCapturedPassMatchDispatch(commandList, group_count_x, group_count_y, group_count_z))
+	{
+		g_lastBlockedPass = buildCurrentDispatchPassSignature(commandList, group_count_x, group_count_y, group_count_z);
 		return true;
 	}
 
@@ -876,9 +931,25 @@ void loadShaderTogglerIniFile()
 	if (loadedCapturedIndices != UINT_MAX)
 		g_capturedPass.indices = loadedCapturedIndices;
 
+	uint32_t loadedDispatchX = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassDispatchX", "General"));
+	if (loadedDispatchX != UINT_MAX)
+		g_capturedPass.dispatchX = loadedDispatchX;
+
+	uint32_t loadedDispatchY = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassDispatchY", "General"));
+	if (loadedDispatchY != UINT_MAX)
+		g_capturedPass.dispatchY = loadedDispatchY;
+
+	uint32_t loadedDispatchZ = static_cast<uint32_t>(iniFile.GetUInt("CapturedPassDispatchZ", "General"));
+	if (loadedDispatchZ != UINT_MAX)
+		g_capturedPass.dispatchZ = loadedDispatchZ;
+
 	const t_Str capturedIndexedValue = iniFile.GetValue("CapturedPassIndexed", "General");
 	if (!capturedIndexedValue.empty())
 		g_capturedPass.indexed = iniFile.GetBool("CapturedPassIndexed", "General");
+
+	const t_Str capturedComputeValue = iniFile.GetValue("CapturedPassIsCompute", "General");
+	if (!capturedComputeValue.empty())
+		g_capturedPass.isCompute = iniFile.GetBool("CapturedPassIsCompute", "General");
 
 	const t_Str capturedHasViewportValue = iniFile.GetValue("CapturedPassHasViewport", "General");
 	if (!capturedHasViewportValue.empty())
@@ -909,6 +980,15 @@ void loadShaderTogglerIniFile()
 			static_cast<uint64_t>(loadedCapturedPipelineLo);
 	}
 
+	uint32_t loadedCapturedComputeLo = iniFile.GetUInt("CapturedPassComputeLo", "General");
+	uint32_t loadedCapturedComputeHi = iniFile.GetUInt("CapturedPassComputeHi", "General");
+	if (loadedCapturedComputeLo != UINT_MAX && loadedCapturedComputeHi != UINT_MAX)
+	{
+		g_capturedPass.computePipeline =
+			(static_cast<uint64_t>(loadedCapturedComputeHi) << 32) |
+			static_cast<uint64_t>(loadedCapturedComputeLo);
+	}
+
 	uint32_t loadedCapturedRTLo = iniFile.GetUInt("CapturedPassRTVLo", "General");
 	uint32_t loadedCapturedRTHi = iniFile.GetUInt("CapturedPassRTVHi", "General");
 	if (loadedCapturedRTLo != UINT_MAX && loadedCapturedRTHi != UINT_MAX)
@@ -917,22 +997,6 @@ void loadShaderTogglerIniFile()
 			(static_cast<uint64_t>(loadedCapturedRTHi) << 32) |
 			static_cast<uint64_t>(loadedCapturedRTLo);
 	}
-
-	const t_Str collectOnlyLikelyValue = iniFile.GetValue("CollectOnlyLikelyPostProcessPasses", "General");
-	if (!collectOnlyLikelyValue.empty())
-		g_collectOnlyLikelyPostProcessPasses = iniFile.GetBool("CollectOnlyLikelyPostProcessPasses", "General");
-
-	const t_Str ignoreRTValue = iniFile.GetValue("IgnoreRenderTargetWhenCollectingPasses", "General");
-	if (!ignoreRTValue.empty())
-		g_ignoreRenderTargetWhenCollectingPasses = iniFile.GetBool("IgnoreRenderTargetWhenCollectingPasses", "General");
-
-	const t_Str ignoreSmallViewportValue = iniFile.GetValue("IgnoreSmallViewportPasses", "General");
-	if (!ignoreSmallViewportValue.empty())
-		g_ignoreSmallViewportPasses = iniFile.GetBool("IgnoreSmallViewportPasses", "General");
-
-	int loadedMaxCandidates = iniFile.GetInt("MaxPassCandidates", "General");
-	if (loadedMaxCandidates != INT_MIN)
-		g_maxPassCandidates = loadedMaxCandidates;
 
 	if (g_fullscreenPassMaxVertices < 3) g_fullscreenPassMaxVertices = 3;
 	if (g_fullscreenPassMaxVertices > 128) g_fullscreenPassMaxVertices = 128;
@@ -947,8 +1011,6 @@ void loadShaderTogglerIniFile()
 	if (g_cornerUiMaxHeightRatio > 1.0f) g_cornerUiMaxHeightRatio = 1.0f;
 	if (g_cornerUiEdgeToleranceRatio < 0.0f) g_cornerUiEdgeToleranceRatio = 0.0f;
 	if (g_cornerUiEdgeToleranceRatio > 0.5f) g_cornerUiEdgeToleranceRatio = 0.5f;
-	if (g_maxPassCandidates < 128) g_maxPassCandidates = 128;
-	if (g_maxPassCandidates > 20000) g_maxPassCandidates = 20000;
 
 	if (usingCustomFormat)
 	{
@@ -992,8 +1054,12 @@ void saveShaderTogglerIniFile()
 	iniFile.SetBool("MatchCapturedPassViewport", g_matchCapturedPassViewport, "", "General");
 	iniFile.SetBool("MatchCapturedPassRenderTarget", g_matchCapturedPassRenderTarget, "", "General");
 
+	iniFile.SetBool("CapturedPassIsCompute", g_capturedPass.isCompute, "", "General");
 	iniFile.SetUInt("CapturedPassVertices", g_capturedPass.vertices, "", "General");
 	iniFile.SetUInt("CapturedPassIndices", g_capturedPass.indices, "", "General");
+	iniFile.SetUInt("CapturedPassDispatchX", g_capturedPass.dispatchX, "", "General");
+	iniFile.SetUInt("CapturedPassDispatchY", g_capturedPass.dispatchY, "", "General");
+	iniFile.SetUInt("CapturedPassDispatchZ", g_capturedPass.dispatchZ, "", "General");
 	iniFile.SetBool("CapturedPassIndexed", g_capturedPass.indexed, "", "General");
 	iniFile.SetBool("CapturedPassHasViewport", g_capturedPass.hasViewport, "", "General");
 	iniFile.SetFloat("CapturedPassViewportX", g_capturedPass.viewportX, "", "General");
@@ -1002,6 +1068,8 @@ void saveShaderTogglerIniFile()
 	iniFile.SetFloat("CapturedPassViewportH", g_capturedPass.viewportHeight, "", "General");
 	iniFile.SetUInt("CapturedPassPipelineLo", static_cast<uint32_t>(g_capturedPass.pixelPipeline & 0xFFFFFFFFull), "", "General");
 	iniFile.SetUInt("CapturedPassPipelineHi", static_cast<uint32_t>((g_capturedPass.pixelPipeline >> 32) & 0xFFFFFFFFull), "", "General");
+	iniFile.SetUInt("CapturedPassComputeLo", static_cast<uint32_t>(g_capturedPass.computePipeline & 0xFFFFFFFFull), "", "General");
+	iniFile.SetUInt("CapturedPassComputeHi", static_cast<uint32_t>((g_capturedPass.computePipeline >> 32) & 0xFFFFFFFFull), "", "General");
 	iniFile.SetUInt("CapturedPassRTVLo", static_cast<uint32_t>(g_capturedPass.renderTargetView & 0xFFFFFFFFull), "", "General");
 	iniFile.SetUInt("CapturedPassRTVHi", static_cast<uint32_t>((g_capturedPass.renderTargetView >> 32) & 0xFFFFFFFFull), "", "General");
 
@@ -1010,11 +1078,6 @@ void saveShaderTogglerIniFile()
 	iniFile.SetFloat("CornerUiMaxWidthRatio", g_cornerUiMaxWidthRatio, "", "General");
 	iniFile.SetFloat("CornerUiMaxHeightRatio", g_cornerUiMaxHeightRatio, "", "General");
 	iniFile.SetFloat("CornerUiEdgeToleranceRatio", g_cornerUiEdgeToleranceRatio, "", "General");
-
-	iniFile.SetBool("CollectOnlyLikelyPostProcessPasses", g_collectOnlyLikelyPostProcessPasses, "", "General");
-	iniFile.SetBool("IgnoreRenderTargetWhenCollectingPasses", g_ignoreRenderTargetWhenCollectingPasses, "", "General");
-	iniFile.SetBool("IgnoreSmallViewportPasses", g_ignoreSmallViewportPasses, "", "General");
-	iniFile.SetInt("MaxPassCandidates", g_maxPassCandidates, "", "General");
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
@@ -1037,6 +1100,10 @@ static void onInitCommandList(command_list *commandList)
 	data.lastVertexCount = 0;
 	data.lastIndexCount = 0;
 	data.lastDrawIndexed = false;
+	data.lastDispatchX = 0;
+	data.lastDispatchY = 0;
+	data.lastDispatchZ = 0;
+	data.lastWasDispatch = false;
 	data.currentRenderTargetView = 0;
 	data.hasViewport = false;
 	data.viewportX = 0.0f;
@@ -1059,6 +1126,10 @@ static void onResetCommandList(command_list *commandList)
 	data.lastVertexCount = 0;
 	data.lastIndexCount = 0;
 	data.lastDrawIndexed = false;
+	data.lastDispatchX = 0;
+	data.lastDispatchY = 0;
+	data.lastDispatchZ = 0;
+	data.lastWasDispatch = false;
 	data.currentRenderTargetView = 0;
 	data.hasViewport = false;
 	data.viewportX = 0.0f;
@@ -1157,6 +1228,17 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 
 static void displayPassSignatureText(const char* label, const GroupPassSignature& sig)
 {
+	if (sig.isCompute)
+	{
+		ImGui::Text("%s: compute, pipeline=%llu, dispatch=(%u,%u,%u)",
+			label,
+			static_cast<unsigned long long>(sig.computePipeline),
+			sig.dispatchX,
+			sig.dispatchY,
+			sig.dispatchZ);
+		return;
+	}
+
 	ImGui::Text("%s: %s, pipeline=%llu, rtv=%llu, verts=%u, indices=%u",
 		label,
 		sig.indexed ? "indexed" : "non-indexed",
@@ -1193,7 +1275,6 @@ static void endPassEditing(bool acceptCollectedPasses, ToggleGroup& groupEditing
 	g_passCandidates.clear();
 	g_activePassCandidateIndex = -1;
 	g_previewCurrentPass = true;
-	g_passCandidateLimitReached = false;
 }
 
 static void cancelCurrentShaderEditing()
@@ -1231,7 +1312,6 @@ static void cancelCurrentPassEditing()
 		g_passCandidates.clear();
 		g_activePassCandidateIndex = -1;
 		g_previewCurrentPass = true;
-		g_passCandidateLimitReached = false;
 	}
 }
 
@@ -1280,12 +1360,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *)
 		{
 			ImGui::Separator();
 			ImGui::Text("Editing passes for group: %s", editingGroupName.c_str());
-			ImGui::Text("Pass candidates: %d / %d", static_cast<int>(g_passCandidates.size()), g_maxPassCandidates);
-
-			if (g_passCandidateLimitReached)
-			{
-				ImGui::TextWrapped("Candidate limit reached. Collection has stopped to avoid instability. Use the current list, or raise the limit in the settings if you really need to.");
-			}
+			ImGui::Text("Pass candidates: %d", static_cast<int>(g_passCandidates.size()));
 
 			if (g_activePassCandidateIndex >= 0 && g_activePassCandidateIndex < static_cast<int>(g_passCandidates.size()))
 			{
@@ -1424,11 +1499,23 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		}
 	}
 
-	const GroupPassSignature currentPass = buildCurrentPassSignature(
-		commandList,
-		commandListData.lastDrawIndexed ? 0 : commandListData.lastVertexCount,
-		commandListData.lastDrawIndexed ? commandListData.lastIndexCount : 0,
-		commandListData.lastDrawIndexed);
+	GroupPassSignature currentPass{};
+	if (commandListData.lastWasDispatch)
+	{
+		currentPass = buildCurrentDispatchPassSignature(
+			commandList,
+			commandListData.lastDispatchX,
+			commandListData.lastDispatchY,
+			commandListData.lastDispatchZ);
+	}
+	else
+	{
+		currentPass = buildCurrentDrawPassSignature(
+			commandList,
+			commandListData.lastDrawIndexed ? 0 : commandListData.lastVertexCount,
+			commandListData.lastDrawIndexed ? commandListData.lastIndexCount : 0,
+			commandListData.lastDrawIndexed);
+	}
 
 	for (auto& group : g_toggleGroups)
 	{
@@ -1453,8 +1540,12 @@ static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t, u
 		data.lastVertexCount = vertex_count;
 		data.lastIndexCount = 0;
 		data.lastDrawIndexed = false;
-		g_lastSeenPass = buildCurrentPassSignature(commandList, vertex_count, 0, false);
-		collectPassCandidate(commandList, vertex_count, 0, false);
+		data.lastDispatchX = 0;
+		data.lastDispatchY = 0;
+		data.lastDispatchZ = 0;
+		data.lastWasDispatch = false;
+		g_lastSeenPass = buildCurrentDrawPassSignature(commandList, vertex_count, 0, false);
+		collectDrawPassCandidate(commandList, vertex_count, 0, false);
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
@@ -1469,12 +1560,36 @@ static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint3
 		data.lastVertexCount = 0;
 		data.lastIndexCount = index_count;
 		data.lastDrawIndexed = true;
-		g_lastSeenPass = buildCurrentPassSignature(commandList, 0, index_count, true);
-		collectPassCandidate(commandList, 0, index_count, true);
+		data.lastDispatchX = 0;
+		data.lastDispatchY = 0;
+		data.lastDispatchZ = 0;
+		data.lastWasDispatch = false;
+		g_lastSeenPass = buildCurrentDrawPassSignature(commandList, 0, index_count, true);
+		collectDrawPassCandidate(commandList, 0, index_count, true);
 	}
 
 	return blockDrawCallForCommandList(commandList) ||
 	       blockPassRuleForDraw(commandList, 0, index_count, true);
+}
+
+static bool onDispatch(command_list* commandList, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)
+{
+	if (commandList != nullptr)
+	{
+		CommandListDataContainer& data = commandList->get_private_data<CommandListDataContainer>();
+		data.lastVertexCount = 0;
+		data.lastIndexCount = 0;
+		data.lastDrawIndexed = false;
+		data.lastDispatchX = group_count_x;
+		data.lastDispatchY = group_count_y;
+		data.lastDispatchZ = group_count_z;
+		data.lastWasDispatch = true;
+		g_lastSeenPass = buildCurrentDispatchPassSignature(commandList, group_count_x, group_count_y, group_count_z);
+		collectDispatchPassCandidate(commandList, group_count_x, group_count_y, group_count_z);
+	}
+
+	return blockDrawCallForCommandList(commandList) ||
+	       blockPassRuleForDispatch(commandList, group_count_x, group_count_y, group_count_z);
 }
 
 static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource, uint64_t, uint32_t, uint32_t)
@@ -1565,7 +1680,6 @@ static void startPassEditing(ToggleGroup& groupEditing)
 	g_passCandidates.clear();
 	g_activePassCandidateIndex = -1;
 	g_previewCurrentPass = true;
-	g_passCandidateLimitReached = false;
 }
 
 static void showHelpMarker(const char* desc)
@@ -1588,11 +1702,11 @@ static void drawQuickStartSection()
 		ImGui::BulletText("Create a group with 'New'.");
 		ImGui::BulletText("Open 'Edit' to name it and assign a hotkey.");
 		ImGui::BulletText("Use 'Change shaders' to hunt shaders.");
-		ImGui::BulletText("Use 'Change passes' to hunt passes.");
+		ImGui::BulletText("Use 'Change passes' to hunt draw passes and compute dispatches.");
 		ImGui::BulletText("Set pass match mode to Balanced or Loose if Exact misses the effect.");
 		ImGui::BulletText("Press the group's hotkey in-game to toggle it on or off.");
 		ImGui::Spacing();
-		ImGui::TextWrapped("Tip: Vignette and many post-process effects are usually full-screen pixel passes, not separate textures.");
+		ImGui::TextWrapped("Tip: Vignette and many post-process effects are usually not textures. They are often full-screen draw passes or compute dispatches.");
 	}
 }
 
@@ -1613,14 +1727,17 @@ static void drawPassToolsSection()
 {
 	if (ImGui::CollapsingHeader("Pass Tools", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		ImGui::TextWrapped("Recommended workflow: use 'Change passes' on a group, then cycle with Numpad 1/2, mark with Numpad 3, preview with Numpad 0, and try Balanced match mode first.");
+		ImGui::TextWrapped("Recommended workflow: use 'Change passes' on a group, then cycle with Numpad 1/2, mark with Numpad 3, preview with Numpad 0, and try Balanced mode first.");
 
 		ImGui::Separator();
 		ImGui::Checkbox("Show pass debug info", &g_showPassDebugInfo);
 
 		if (ImGui::Button("Capture last seen pass"))
 		{
-			if (g_lastSeenPass.pixelPipeline != 0 && g_lastSeenPass.pixelPipeline != static_cast<uint64_t>(-1))
+			const bool validDraw = g_lastSeenPass.pixelPipeline != 0 && g_lastSeenPass.pixelPipeline != static_cast<uint64_t>(-1);
+			const bool validCompute = g_lastSeenPass.computePipeline != 0 && g_lastSeenPass.computePipeline != static_cast<uint64_t>(-1);
+
+			if (validDraw || validCompute)
 			{
 				g_hasCapturedPass = true;
 				g_capturedPass = g_lastSeenPass;
@@ -1635,19 +1752,13 @@ static void drawPassToolsSection()
 
 		ImGui::Checkbox("Enable captured pass blocker", &g_enableCapturedPassBlocker);
 		ImGui::SameLine();
-		showHelpMarker("Blocks a pass that exactly matches the captured signature. Useful for testing, but group pass hunting is usually easier.");
+		showHelpMarker("Blocks a captured draw pass or compute dispatch exactly. Useful for testing.");
 
-		if (g_enableCapturedPassBlocker)
+		if (g_enableCapturedPassBlocker && !g_capturedPass.isCompute)
 		{
 			ImGui::Checkbox("Captured pass must match viewport", &g_matchCapturedPassViewport);
 			ImGui::Checkbox("Captured pass must match render target", &g_matchCapturedPassRenderTarget);
 		}
-
-		ImGui::Separator();
-		ImGui::Checkbox("Collect only likely post-process passes", &g_collectOnlyLikelyPostProcessPasses);
-		ImGui::Checkbox("Ignore render target when collecting passes", &g_ignoreRenderTargetWhenCollectingPasses);
-		ImGui::Checkbox("Ignore small viewport passes", &g_ignoreSmallViewportPasses);
-		ImGui::SliderInt("Max pass candidates", &g_maxPassCandidates, 128, 8192);
 
 		if (g_showPassDebugInfo)
 		{
@@ -1717,10 +1828,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8: previous/next marked compute shader");
 		ImGui::TextUnformatted("* Numpad 9: mark/unmark current compute shader");
 		ImGui::TextUnformatted("\nPass hunting hotkeys:");
-		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pass");
-		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pass");
-		ImGui::TextUnformatted("* Numpad 0: toggle preview hide for current pass");
-		ImGui::TextUnformatted("\nWhen 'Change passes' is active, the numpad controls operate on pass candidates instead of shaders.");
+		ImGui::TextUnformatted("* Numpad 1 / 2: previous/next pass candidate");
+		ImGui::TextUnformatted("* Numpad 3: mark/unmark current pass candidate");
+		ImGui::TextUnformatted("* Numpad 0: toggle preview hide for current pass candidate");
+		ImGui::TextUnformatted("\nWhen 'Change passes' is active, the numpad controls operate on draw and compute pass candidates instead of shaders.");
 		ImGui::PopTextWrapPos();
 	}
 
@@ -1896,9 +2007,9 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				}
 				ImGui::SameLine();
 				showHelpMarker(
-					"Exact: strict match. Best for very stable passes.\n"
-					"Balanced: same pipeline + same draw type + similar geometry. Best default for vignette/post-process effects.\n"
-					"Loose: same pipeline + draw type only. Use when Balanced still misses the effect.");
+					"Exact: strict match.\n"
+					"Balanced: same pipeline + similar geometry/dispatch size. Best default.\n"
+					"Loose: same pipeline only. Use when Balanced still misses the effect.");
 				ImGui::PopItemWidth();
 
 				if (!isKeyEditing)
@@ -1926,7 +2037,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			g_passCandidates.clear();
 			g_activePassCandidateIndex = -1;
 			g_previewCurrentPass = true;
-			g_passCandidateLimitReached = false;
 
 			g_pixelShaderManager.stopHuntingMode();
 			g_vertexShaderManager.stopHuntingMode();
@@ -2248,6 +2358,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::register_event<reshade::addon_event::draw>(onDraw);
 		reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+		reshade::register_event<reshade::addon_event::dispatch>(onDispatch);
 		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 		reshade::register_overlay(nullptr, &displaySettings);
 
@@ -2265,6 +2376,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::unregister_event<reshade::addon_event::draw>(onDraw);
 		reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+		reshade::unregister_event<reshade::addon_event::dispatch>(onDispatch);
 		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 		reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);

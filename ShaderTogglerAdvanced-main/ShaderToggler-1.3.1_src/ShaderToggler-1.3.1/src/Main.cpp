@@ -1053,13 +1053,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				if (group.isHoldInverted())
 				{
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.40f, 1.0f));
-					ImGui::Text(" hold inv ");
+					ImGui::Text(" Hold Invert ");
 					ImGui::PopStyleColor();
 				}
 				else
 				{
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.82f, 1.0f, 1.0f));
-					ImGui::Text(" hold ");
+					ImGui::Text(" Hold ");
 					ImGui::PopStyleColor();
 				}
 			}

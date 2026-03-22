@@ -8,7 +8,7 @@ namespace ShaderToggler
 	static ToggleGroup::GroupId s_nextGroupId = 1;
 
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
-		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_holdMode(false)
+		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_holdMode(false), m_holdInverted(false)
 	{
 	}
 
@@ -33,7 +33,20 @@ namespace ShaderToggler
 	void ToggleGroup::setEditing(bool editing) { m_editing = editing; }
 
 	bool ToggleGroup::isHoldMode() const { return m_holdMode; }
-	void ToggleGroup::setHoldMode(bool holdMode) { m_holdMode = holdMode; }
+	void ToggleGroup::setHoldMode(bool holdMode)
+	{
+		m_holdMode = holdMode;
+		if (!m_holdMode)
+			m_holdInverted = false;
+	}
+
+	bool ToggleGroup::isHoldInverted() const { return m_holdInverted; }
+	void ToggleGroup::setHoldInverted(bool holdInverted)
+	{
+		m_holdInverted = holdInverted;
+		if (m_holdInverted)
+			m_holdMode = true;
+	}
 
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
@@ -90,6 +103,7 @@ namespace ShaderToggler
 	{
 		clearHashes();
 		m_holdMode = false;
+		m_holdInverted = false;
 
 		if (index < 0)
 		{
@@ -120,6 +134,7 @@ namespace ShaderToggler
 			m_name = "Default";
 			m_activeAtStartup = false;
 			m_holdMode = false;
+			m_holdInverted = false;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			return;
 		}
@@ -172,6 +187,15 @@ namespace ShaderToggler
 			m_holdMode = iniFile.GetBool("HoldMode", sectionRoot);
 		else
 			m_holdMode = false;
+
+		const std::string holdInvertedValue = iniFile.GetValue("HoldInverted", sectionRoot);
+		if (!holdInvertedValue.empty())
+			m_holdInverted = iniFile.GetBool("HoldInverted", sectionRoot);
+		else
+			m_holdInverted = false;
+
+		if (m_holdInverted)
+			m_holdMode = true;
 	}
 
 	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
@@ -210,5 +234,6 @@ namespace ShaderToggler
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
+		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
 	}
 }

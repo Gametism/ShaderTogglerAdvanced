@@ -1,7 +1,7 @@
 ///////////////////////////////////////////////////////////////////////
 //
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
-// which allows you to define groups of shaders to toggle them on/off
+// which allows you to define groups of game shaders to toggle them on/off
 // with one key press.
 //
 // Based on the original ShaderToggler by Frans 'Otis_Inf' Bouma.
@@ -163,6 +163,7 @@ static std::string buildIniSignature()
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
 		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
+		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
 
 		for (auto v : group.getPixelShaderHashes())
 			data += "|P=" + std::to_string(v);
@@ -645,16 +646,16 @@ static void onReshadePresent(effect_runtime* runtime)
 
 		if (group.isHoldMode())
 		{
-			group.setActive(isDownNow);
+			const bool desiredActive = group.isHoldInverted() ? !isDownNow : isDownNow;
+			const bool previousActive = group.isActive();
 
-			if (group.getId() == g_toggleGroupIdShaderEditing)
+			group.setActive(desiredActive);
+
+			if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != desiredActive)
 			{
-				if (g_groupHotkeyWasDown[group.getId()] != isDownNow)
-				{
-					g_vertexShaderManager.toggleHideMarkedShaders();
-					g_pixelShaderManager.toggleHideMarkedShaders();
-					g_computeShaderManager.toggleHideMarkedShaders();
-				}
+				g_vertexShaderManager.toggleHideMarkedShaders();
+				g_pixelShaderManager.toggleHideMarkedShaders();
+				g_computeShaderManager.toggleHideMarkedShaders();
 			}
 
 			g_groupHotkeyWasDown[group.getId()] = isDownNow;
@@ -1049,9 +1050,18 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			if (group.isHoldMode())
 			{
 				ImGui::SameLine();
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.82f, 1.0f, 1.0f));
-				ImGui::Text(" hold ");
-				ImGui::PopStyleColor();
+				if (group.isHoldInverted())
+				{
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.40f, 1.0f));
+					ImGui::Text(" hold inv ");
+					ImGui::PopStyleColor();
+				}
+				else
+				{
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.82f, 1.0f, 1.0f));
+					ImGui::Text(" hold ");
+					ImGui::PopStyleColor();
+				}
 			}
 
 			if (group.isActive())
@@ -1131,6 +1141,19 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::SameLine();
 				showHelpMarker("Useful for ADS / HUD hide behavior. The group stays active only while the hotkey is held.");
 				ImGui::PopItemWidth();
+
+				if (group.isHoldMode())
+				{
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					bool holdInverted = group.isHoldInverted();
+					ImGui::Checkbox("Invert hold behavior", &holdInverted);
+					group.setHoldInverted(holdInverted);
+					ImGui::SameLine();
+					showHelpMarker("When enabled, the group is active normally and turns off only while the hotkey is held.");
+					ImGui::PopItemWidth();
+				}
 
 				if (!isKeyEditing)
 				{

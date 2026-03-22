@@ -8,7 +8,7 @@ namespace ShaderToggler
 	static ToggleGroup::GroupId s_nextGroupId = 1;
 
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
-		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false)
+		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_holdMode(false)
 	{
 	}
 
@@ -31,6 +31,9 @@ namespace ShaderToggler
 
 	bool ToggleGroup::isEditing() const { return m_editing; }
 	void ToggleGroup::setEditing(bool editing) { m_editing = editing; }
+
+	bool ToggleGroup::isHoldMode() const { return m_holdMode; }
+	void ToggleGroup::setHoldMode(bool holdMode) { m_holdMode = holdMode; }
 
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
@@ -86,6 +89,7 @@ namespace ShaderToggler
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
+		m_holdMode = false;
 
 		if (index < 0)
 		{
@@ -115,6 +119,7 @@ namespace ShaderToggler
 
 			m_name = "Default";
 			m_activeAtStartup = false;
+			m_holdMode = false;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			return;
 		}
@@ -161,6 +166,12 @@ namespace ShaderToggler
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
+
+		const std::string holdModeValue = iniFile.GetValue("HoldMode", sectionRoot);
+		if (!holdModeValue.empty())
+			m_holdMode = iniFile.GetBool("HoldMode", sectionRoot);
+		else
+			m_holdMode = false;
 	}
 
 	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
@@ -198,5 +209,6 @@ namespace ShaderToggler
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
+		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
 	}
 }

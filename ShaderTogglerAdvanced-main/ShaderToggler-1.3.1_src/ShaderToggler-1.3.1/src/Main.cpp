@@ -162,6 +162,7 @@ static std::string buildIniSignature()
 		data += "|Name=" + group.getName();
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
+		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
 
 		for (auto v : group.getPixelShaderHashes())
 			data += "|P=" + std::to_string(v);
@@ -641,6 +642,25 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
+
+		if (group.isHoldMode())
+		{
+			group.setActive(isDownNow);
+
+			if (group.getId() == g_toggleGroupIdShaderEditing)
+			{
+				if (g_groupHotkeyWasDown[group.getId()] != isDownNow)
+				{
+					g_vertexShaderManager.toggleHideMarkedShaders();
+					g_pixelShaderManager.toggleHideMarkedShaders();
+					g_computeShaderManager.toggleHideMarkedShaders();
+				}
+			}
+
+			g_groupHotkeyWasDown[group.getId()] = isDownNow;
+			continue;
+		}
+
 		bool& wasDownLastFrame = g_groupHotkeyWasDown[group.getId()];
 		auto& lastToggleTime = g_groupHotkeyLastToggleTime[group.getId()];
 
@@ -1026,6 +1046,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			ImGui::Text(" %s (%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str());
 
+			if (group.isHoldMode())
+			{
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.82f, 1.0f, 1.0f));
+				ImGui::Text(" hold ");
+				ImGui::PopStyleColor();
+			}
+
 			if (group.isActive())
 			{
 				ImGui::SameLine();
@@ -1092,6 +1120,16 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				bool isDefaultActive = group.isActiveAtStartup();
 				ImGui::Checkbox("Is active at startup", &isDefaultActive);
 				group.setIsActiveAtStartup(isDefaultActive);
+				ImGui::PopItemWidth();
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				bool holdMode = group.isHoldMode();
+				ImGui::Checkbox("Only active while holding key", &holdMode);
+				group.setHoldMode(holdMode);
+				ImGui::SameLine();
+				showHelpMarker("Useful for ADS / HUD hide behavior. The group stays active only while the hotkey is held.");
 				ImGui::PopItemWidth();
 
 				if (!isKeyEditing)

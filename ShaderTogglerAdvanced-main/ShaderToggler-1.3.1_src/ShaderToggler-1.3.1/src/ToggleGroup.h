@@ -33,6 +33,9 @@ namespace ShaderToggler
 		bool isEditing() const;
 		void setEditing(bool editing);
 
+		bool isHoldMode() const;
+		void setHoldMode(bool holdMode);
+
 		void setToggleKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		void setToggleKey(const KeyData& key);
 		const KeyData& getToggleKey() const;
@@ -59,6 +62,7 @@ namespace ShaderToggler
 		bool m_active;
 		bool m_activeAtStartup;
 		bool m_editing;
+		bool m_holdMode;
 		KeyData m_toggleKey;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;

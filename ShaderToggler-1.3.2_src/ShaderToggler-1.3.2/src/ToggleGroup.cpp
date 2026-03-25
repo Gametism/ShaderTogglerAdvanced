@@ -89,21 +89,6 @@ namespace ShaderToggler
 	const std::unordered_set<uint32_t>& ToggleGroup::getVertexShaderHashes() const { return m_vertexShaderHashes; }
 	const std::unordered_set<uint32_t>& ToggleGroup::getComputeShaderHashes() const { return m_computeShaderHashes; }
 
-	void ToggleGroup::clearTextureHashes()
-	{
-		m_textureHashes.clear();
-	}
-
-	void ToggleGroup::storeCollectedTextureHashes(const std::unordered_set<uint64_t>& textures)
-	{
-		m_textureHashes = textures;
-	}
-
-	const std::unordered_set<uint64_t>& ToggleGroup::getTextureHashes() const
-	{
-		return m_textureHashes;
-	}
-
 	ToggleGroup ToggleGroup::makeDuplicate() const
 	{
 		ToggleGroup copy(*this);
@@ -117,7 +102,6 @@ namespace ShaderToggler
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
-		clearTextureHashes();
 		m_holdMode = false;
 		m_holdInverted = false;
 
@@ -160,7 +144,6 @@ namespace ShaderToggler
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
-		const std::string textureHashesCategory = sectionRoot + "_Textures";
 
 		int amountShaders = iniFile.GetInt("AmountHashes", vertexHashesCategory);
 		for (int i = 0; i < amountShaders; i++)
@@ -184,19 +167,6 @@ namespace ShaderToggler
 			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
 			if (hash != UINT_MAX)
 				m_computeShaderHashes.insert(hash);
-		}
-
-		int amountTextures = iniFile.GetInt("AmountHashes", textureHashesCategory);
-		for (int i = 0; i < amountTextures; i++)
-		{
-			const std::string keyBase = "TextureHash" + std::to_string(i);
-			uint32_t lo = iniFile.GetUInt(keyBase + "_Lo", textureHashesCategory);
-			uint32_t hi = iniFile.GetUInt(keyBase + "_Hi", textureHashesCategory);
-			if (lo != UINT_MAX && hi != UINT_MAX)
-			{
-				uint64_t hash = (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo);
-				m_textureHashes.insert(hash);
-			}
 		}
 
 		m_name = iniFile.GetValue("Name", sectionRoot);
@@ -235,7 +205,6 @@ namespace ShaderToggler
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
-		const std::string textureHashesCategory = sectionRoot + "_Textures";
 
 		int counter = 0;
 		for (const auto hash : m_vertexShaderHashes)
@@ -260,16 +229,6 @@ namespace ShaderToggler
 			counter++;
 		}
 		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
-
-		counter = 0;
-		for (const auto hash : m_textureHashes)
-		{
-			const std::string keyBase = "TextureHash" + std::to_string(counter);
-			iniFile.SetUInt(keyBase + "_Lo", static_cast<uint32_t>(hash & 0xFFFFFFFFull), "", textureHashesCategory);
-			iniFile.SetUInt(keyBase + "_Hi", static_cast<uint32_t>((hash >> 32) & 0xFFFFFFFFull), "", textureHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", textureHashesCategory);
 
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);

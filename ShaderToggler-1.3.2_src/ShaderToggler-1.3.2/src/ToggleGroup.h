@@ -54,10 +54,6 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
-		void clearTextureHashes();
-		void storeCollectedTextureHashes(const std::unordered_set<uint64_t>& textures);
-		const std::unordered_set<uint64_t>& getTextureHashes() const;
-
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
@@ -76,6 +72,5 @@ namespace ShaderToggler
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
-		std::unordered_set<uint64_t> m_textureHashes;
 	};
 }

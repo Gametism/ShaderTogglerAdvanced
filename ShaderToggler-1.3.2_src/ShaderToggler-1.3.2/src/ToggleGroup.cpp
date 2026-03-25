@@ -8,7 +8,7 @@ namespace ShaderToggler
 	static ToggleGroup::GroupId s_nextGroupId = 1;
 
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
-		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_holdMode(false), m_holdInverted(false)
+		: m_id(id), m_name(name), m_active(false), m_activeAtStartup(false), m_editing(false), m_holdMode(false), m_timedMode(false), m_holdInverted(false), m_autoHideDelayMs(1500)
 	{
 	}
 
@@ -36,8 +36,21 @@ namespace ShaderToggler
 	void ToggleGroup::setHoldMode(bool holdMode)
 	{
 		m_holdMode = holdMode;
+		if (m_holdMode)
+			m_timedMode = false;
 		if (!m_holdMode)
 			m_holdInverted = false;
+	}
+
+	bool ToggleGroup::isTimedMode() const { return m_timedMode; }
+	void ToggleGroup::setTimedMode(bool timedMode)
+	{
+		m_timedMode = timedMode;
+		if (m_timedMode)
+		{
+			m_holdMode = false;
+			m_holdInverted = false;
+		}
 	}
 
 	bool ToggleGroup::isHoldInverted() const { return m_holdInverted; }
@@ -45,7 +58,16 @@ namespace ShaderToggler
 	{
 		m_holdInverted = holdInverted;
 		if (m_holdInverted)
+		{
 			m_holdMode = true;
+			m_timedMode = false;
+		}
+	}
+
+	int ToggleGroup::getAutoHideDelayMs() const { return m_autoHideDelayMs; }
+	void ToggleGroup::setAutoHideDelayMs(int delayMs)
+	{
+		m_autoHideDelayMs = (delayMs < 0) ? 0 : delayMs;
 	}
 
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
@@ -103,7 +125,9 @@ namespace ShaderToggler
 	{
 		clearHashes();
 		m_holdMode = false;
+		m_timedMode = false;
 		m_holdInverted = false;
+		m_autoHideDelayMs = 1500;
 
 		if (index < 0)
 		{
@@ -134,7 +158,9 @@ namespace ShaderToggler
 			m_name = "Default";
 			m_activeAtStartup = false;
 			m_holdMode = false;
+			m_timedMode = false;
 			m_holdInverted = false;
+			m_autoHideDelayMs = 1500;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			return;
 		}
@@ -188,14 +214,25 @@ namespace ShaderToggler
 		else
 			m_holdMode = false;
 
+		const std::string timedModeValue = iniFile.GetValue("TimedMode", sectionRoot);
+		if (!timedModeValue.empty())
+			m_timedMode = iniFile.GetBool("TimedMode", sectionRoot);
+		else
+			m_timedMode = false;
+
 		const std::string holdInvertedValue = iniFile.GetValue("HoldInverted", sectionRoot);
 		if (!holdInvertedValue.empty())
 			m_holdInverted = iniFile.GetBool("HoldInverted", sectionRoot);
 		else
 			m_holdInverted = false;
 
+		const int autoHideDelayMs = iniFile.GetInt("AutoHideDelayMs", sectionRoot);
+		m_autoHideDelayMs = (autoHideDelayMs == INT_MIN) ? 1500 : (autoHideDelayMs < 0 ? 0 : autoHideDelayMs);
+
 		if (m_holdInverted)
 			m_holdMode = true;
+		if (m_holdMode)
+			m_timedMode = false;
 	}
 
 	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
@@ -234,6 +271,8 @@ namespace ShaderToggler
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
+		iniFile.SetBool("TimedMode", m_timedMode, "", sectionRoot);
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
+		iniFile.SetUInt("AutoHideDelayMs", static_cast<uint32_t>(m_autoHideDelayMs), "", sectionRoot);
 	}
 }

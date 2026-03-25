@@ -77,6 +77,7 @@ static std::string g_iniFileName = "";
 // Per-group hotkey edge/debounce state
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastTriggerTime;
 static const int g_groupHotkeyDebounceMs = 150;
 
 // Global all-groups toggle state
@@ -172,6 +173,8 @@ data += "|AllGroupsKey=" + std::to_string(g_allGroupsToggleKey.toInt());
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
 		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
+		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
+		data += "|AutoHideDelayMs=" + std::to_string(group.getAutoHideDelayMs());
 		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
 
 		for (auto v : group.getPixelShaderHashes())
@@ -351,10 +354,13 @@ void loadShaderTogglerIniFile()
 	}
 
 	g_toggleGroups.clear();
+	const auto nowTime = std::chrono::steady_clock::now();
 	for (int i = 0; i < numberOfGroups; i++)
 	{
 		g_toggleGroups.push_back(ToggleGroup("", ToggleGroup::getNewGroupId()));
 		g_toggleGroups.back().loadState(iniFile, i, usingCustomFormat);
+		if (g_toggleGroups.back().isTimedMode() && g_toggleGroups.back().isActive())
+			g_groupHotkeyLastTriggerTime[g_toggleGroups.back().getId()] = nowTime;
 	}
 
 	if (usingCustomFormat)
@@ -672,9 +678,26 @@ static void onReshadePresent(effect_runtime* runtime)
 	}
 	g_allGroupsToggleWasDown = isAllGroupsToggleDownNow;
 
+	auto syncShaderEditingGroupVisibility = [&](const ToggleGroup& group, bool previousActive)
+	{
+		if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != group.isActive())
+		{
+			g_vertexShaderManager.toggleHideMarkedShaders();
+			g_pixelShaderManager.toggleHideMarkedShaders();
+			g_computeShaderManager.toggleHideMarkedShaders();
+		}
+	};
+
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
+		bool& wasDownLastFrame = g_groupHotkeyWasDown[group.getId()];
+		auto& lastToggleTime = g_groupHotkeyLastToggleTime[group.getId()];
+		auto& lastTriggerTime = g_groupHotkeyLastTriggerTime[group.getId()];
+
+		const auto nowTime = std::chrono::steady_clock::now();
+		const auto msSinceLastToggle =
+			std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - lastToggleTime).count();
 
 		if (group.isHoldMode())
 		{
@@ -682,36 +705,45 @@ static void onReshadePresent(effect_runtime* runtime)
 			const bool previousActive = group.isActive();
 
 			group.setActive(desiredActive);
+			syncShaderEditingGroupVisibility(group, previousActive);
 
-			if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != desiredActive)
-			{
-				g_vertexShaderManager.toggleHideMarkedShaders();
-				g_pixelShaderManager.toggleHideMarkedShaders();
-				g_computeShaderManager.toggleHideMarkedShaders();
-			}
-
-			g_groupHotkeyWasDown[group.getId()] = isDownNow;
+			wasDownLastFrame = isDownNow;
 			continue;
 		}
 
-		bool& wasDownLastFrame = g_groupHotkeyWasDown[group.getId()];
-		auto& lastToggleTime = g_groupHotkeyLastToggleTime[group.getId()];
+		if (group.isTimedMode())
+		{
+			if (isDownNow && !wasDownLastFrame && msSinceLastToggle > g_groupHotkeyDebounceMs)
+			{
+				const bool previousActive = group.isActive();
+				group.setActive(true);
+				lastToggleTime = nowTime;
+				lastTriggerTime = nowTime;
+				syncShaderEditingGroupVisibility(group, previousActive);
+			}
+			else if (group.isActive())
+			{
+				const auto elapsedSinceTriggerMs =
+					std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - lastTriggerTime).count();
 
-		const auto nowTime = std::chrono::steady_clock::now();
-		const auto msSinceLastToggle =
-			std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - lastToggleTime).count();
+				if (elapsedSinceTriggerMs >= group.getAutoHideDelayMs())
+				{
+					const bool previousActive = group.isActive();
+					group.setActive(false);
+					syncShaderEditingGroupVisibility(group, previousActive);
+				}
+			}
+
+			wasDownLastFrame = isDownNow;
+			continue;
+		}
 
 		if (isDownNow && !wasDownLastFrame && msSinceLastToggle > g_groupHotkeyDebounceMs)
 		{
+			const bool previousActive = group.isActive();
 			group.setActive(!group.isActive());
 			lastToggleTime = nowTime;
-
-			if (group.getId() == g_toggleGroupIdShaderEditing)
-			{
-				g_vertexShaderManager.toggleHideMarkedShaders();
-				g_pixelShaderManager.toggleHideMarkedShaders();
-				g_computeShaderManager.toggleHideMarkedShaders();
-			}
+			syncShaderEditingGroupVisibility(group, previousActive);
 		}
 
 		wasDownLastFrame = isDownNow;
@@ -1151,6 +1183,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					ImGui::PopStyleColor();
 				}
 			}
+			else if (group.isTimedMode())
+			{
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.82f, 0.42f, 1.0f));
+				ImGui::Text(" Auto-hide (%d ms) ", group.getAutoHideDelayMs());
+				ImGui::PopStyleColor();
+			}
 
 			if (group.isActive())
 			{
@@ -1221,13 +1260,24 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::PopItemWidth();
 
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
-				ImGui::Text(" ");
+				ImGui::Text("Mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				bool holdMode = group.isHoldMode();
-				ImGui::Checkbox("Only active while holding key", &holdMode);
-				group.setHoldMode(holdMode);
+				int activationMode = group.isTimedMode() ? 2 : (group.isHoldMode() ? 1 : 0);
+				const char* activationModeLabels[] = { "Toggle", "Hold", "Auto-hide timer" };
+				if (ImGui::Combo("##Activation mode", &activationMode, activationModeLabels, IM_ARRAYSIZE(activationModeLabels)))
+				{
+					group.setTimedMode(activationMode == 2);
+					group.setHoldMode(activationMode == 1);
+					if (activationMode != 1)
+						group.setHoldInverted(false);
+					if (activationMode == 2)
+						group.setActive(false);
+					g_groupHotkeyWasDown[group.getId()] = false;
+					g_groupHotkeyLastToggleTime[group.getId()] = std::chrono::steady_clock::now();
+					g_groupHotkeyLastTriggerTime[group.getId()] = std::chrono::steady_clock::now();
+				}
 				ImGui::SameLine();
-				showHelpMarker("Useful for ADS / HUD hide behavior. The group stays active only while the hotkey is held.");
+				showHelpMarker("Toggle: press once to switch on/off. Hold: active only while the hotkey is held. Auto-hide timer: a press shows the group, then hides it automatically after the delay unless pressed again.");
 				ImGui::PopItemWidth();
 
 				if (group.isHoldMode())
@@ -1240,6 +1290,22 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setHoldInverted(holdInverted);
 					ImGui::SameLine();
 					showHelpMarker("When enabled, the group is active normally and turns off only while the hotkey is held.");
+					ImGui::PopItemWidth();
+				}
+				else if (group.isTimedMode())
+				{
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					int autoHideDelayMs = group.getAutoHideDelayMs();
+					if (ImGui::InputInt("Auto-hide delay (ms)", &autoHideDelayMs, 100, 500))
+					{
+						if (autoHideDelayMs < 0)
+							autoHideDelayMs = 0;
+						group.setAutoHideDelayMs(autoHideDelayMs);
+					}
+					ImGui::SameLine();
+					showHelpMarker("Each fresh press of the assigned key or gamepad button shows the group and refreshes this timer.");
 					ImGui::PopItemWidth();
 				}
 

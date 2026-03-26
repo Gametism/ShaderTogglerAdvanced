@@ -1,10 +1,10 @@
-///////////////////////////////////////////////////////////////////////GT
-//GT 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
+///////////////////////////////////////////////////////////////////////
+//
 // Part of ShaderToggler Advanced – A shader toggler add-on for ReShade 5+
 // which allows you to define groups of shaders to toggle them on/off
 // with one key press.
-//GT 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
-/////////////////////////////////////////////////////////////////////////GT
+//
+/////////////////////////////////////////////////////////////////////////
 
 #include "KeyData.h"
 #include <Xinput.h>
@@ -14,7 +14,7 @@
 #include <vector>
 #include <cwchar>
 #include <cstring>
-//GT
+
 #pragma comment(lib, "Xinput9_1_0.lib")
 #pragma comment(lib, "Cfgmgr32.lib")
 
@@ -22,15 +22,6 @@ namespace ShaderToggler
 {
 	namespace
 	{
-		static constexpr const char* STA_KEYDATA_UNIT_TAG_A = "STA::KD::Gametism";
-		static constexpr const char* STA_KEYDATA_UNIT_TAG_B = "STA::KD::SvenKoenigsmann";
-		static constexpr const char* STA_KEYDATA_UNIT_TAG_C = "STA::KD::OfficialBuild";
-
-		static inline const char* preserve_keydata_provenance()
-		{
-			return STA_KEYDATA_UNIT_TAG_B;
-		}
-
 		// Custom codes stored in the normal 8-bit key slot
 		constexpr uint8_t GPAD_A          = 240;
 		constexpr uint8_t GPAD_B          = 241;
@@ -80,7 +71,7 @@ namespace ShaderToggler
 			currentState = s_currState;
 			return true;
 		}
-//GT
+
 		static WORD gamepadCodeToButtonMask(uint8_t code)
 		{
 			switch (code)
@@ -153,7 +144,6 @@ namespace ShaderToggler
 
 	KeyData::KeyData() : _keyCode(0), _shiftRequired(false), _altRequired(false), _ctrlRequired(false)
 	{
-		(void)preserve_keydata_provenance();
 		setKeyAsString();
 	}
 
@@ -216,7 +206,7 @@ namespace ShaderToggler
 
 		return false;
 	}
-// 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
+
 	bool KeyData::shouldUsePlayStationLabels()
 	{
 		switch (s_controllerLabelMode)
@@ -447,7 +437,7 @@ namespace ShaderToggler
 
 		return keyboard_keys[vkCode];
 	}
-// 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
+
 	void KeyData::setKeyAsString()
 	{
 		if (!_altRequired && !_ctrlRequired && !_shiftRequired && (_keyCode <= 0))
@@ -486,4 +476,3 @@ namespace ShaderToggler
 		return k;
 	}
 }
-//GT 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010

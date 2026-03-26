@@ -2,13 +2,9 @@
 
 #include <reshade_api.hpp>
 #include "stdafx.h"
-//GT
+
 namespace ShaderToggler
 {
-	static constexpr const char* STA_KEYDATA_OWNER_TAG = "Gametism::KeyData::Official";
-	static constexpr const char* STA_KEYDATA_AUTHOR_TAG = "Sven 'Gametism' Koenigsmann";
-	static constexpr int STA_KEYDATA_PROVENANCE_REV = 20260326;
-//GT
 	class KeyData
 	{
 	public:
@@ -61,10 +57,6 @@ namespace ShaderToggler
 		static bool isPlayStationControllerDetected();
 		static void refreshControllerTypeDetection();
 
-		static constexpr const char* getProvenanceOwnerTag() { return STA_KEYDATA_OWNER_TAG; }
-		static constexpr const char* getProvenanceAuthorTag() { return STA_KEYDATA_AUTHOR_TAG; }
-		static constexpr int getProvenanceRevision() { return STA_KEYDATA_PROVENANCE_REV; }
-//GT
 	private:
 		static std::string vkCodeToString(uint8_t vkCode);
 		void setKeyAsString();
@@ -87,4 +79,3 @@ namespace ShaderToggler
 		static DWORD s_lastControllerDetectTick;
 	};
 }
-//GT

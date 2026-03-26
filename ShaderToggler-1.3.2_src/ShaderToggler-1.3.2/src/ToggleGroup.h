@@ -8,12 +8,6 @@
 
 namespace ShaderToggler
 {
-	//
-	static constexpr const char* STA_TOGGLEGROUP_OWNER_TAG = "Gametism::ToggleGroup::Official";
-	static constexpr const char* STA_TOGGLEGROUP_AUTHOR_TAG = "Sven 'Gametism' Koenigsmann";
-	static constexpr const char* STA_TOGGLEGROUP_PROJECT_TAG = "ShaderToggler Advanced";
-	static constexpr int STA_TOGGLEGROUP_PROVENANCE_REV = 20260326;
-
 	class ToggleGroup
 	{
 	public:
@@ -60,16 +54,14 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
+		void clearTextureHashes();
+		void storeCollectedTextureHashes(const std::unordered_set<uint64_t>& textures);
+		const std::unordered_set<uint64_t>& getTextureHashes() const;
+
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
 		ToggleGroup makeDuplicate() const;
-
-		// Harmless provenance accessors for diagnostics/ownership continuity.
-		static constexpr const char* getProvenanceOwnerTag() { return STA_TOGGLEGROUP_OWNER_TAG; }
-		static constexpr const char* getProvenanceAuthorTag() { return STA_TOGGLEGROUP_AUTHOR_TAG; }
-		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
-		static constexpr int getProvenanceRevision() { return STA_TOGGLEGROUP_PROVENANCE_REV; }
 
 	private:
 		GroupId m_id;
@@ -84,5 +76,6 @@ namespace ShaderToggler
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
+		std::unordered_set<uint64_t> m_textureHashes;
 	};
 }

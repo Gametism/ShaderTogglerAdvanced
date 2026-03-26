@@ -21,7 +21,7 @@
 
 using namespace std;
 
-// 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
+// Globally defined structures, defines, & types
 //////////////////////////////////////////////////////////////////////////////////
 
 #define AUTOCREATE_SECTIONS     (1L<<1)
@@ -43,13 +43,6 @@ typedef std::string t_Str;
 const t_Str CommentIndicators = t_Str(";#");
 const t_Str EqualIndicators   = t_Str("=:");
 const t_Str WhiteSpace        = t_Str(" \t\n\r");
-
-// GT 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
-// GT 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
-static constexpr const char* STA_CDATAFILE_OWNER_TAG = "Gametism::CDataFile::Integration";
-static constexpr const char* STA_CDATAFILE_AUTHOR_TAG = "Sven 'Gametism' Königsmann";
-static constexpr const char* STA_CDATAFILE_PROJECT_TAG = "ShaderToggler Advanced";
-static constexpr int STA_CDATAFILE_PROVENANCE_REV = 20260326;
 
 typedef struct st_key
 {
@@ -144,18 +137,13 @@ public:
 	t_Str CommentStr(t_Str szComment);
 
 	// -----------------------------------------------------------------
-	// 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
+	// Added compatibility helpers for ShaderToggler Advanced
 	// -----------------------------------------------------------------
 	std::vector<uint32_t> GetArray(t_Str szKey, t_Str szSection = t_Str(""));
 	bool SetArray(t_Str szKey, const std::vector<uint32_t>& values,
 		t_Str szComment = t_Str(""), t_Str szSection = t_Str(""));
 	bool SetString(t_Str szKey, t_Str szValue,
 		t_Str szComment = t_Str(""), t_Str szSection = t_Str(""));
-
-	static constexpr const char* getProvenanceOwnerTag() { return STA_CDATAFILE_OWNER_TAG; }
-	static constexpr const char* getProvenanceAuthorTag() { return STA_CDATAFILE_AUTHOR_TAG; }
-	static constexpr const char* getProvenanceProjectTag() { return STA_CDATAFILE_PROJECT_TAG; }
-	static constexpr int getProvenanceRevision() { return STA_CDATAFILE_PROVENANCE_REV; }
 
 protected:
 	t_Key* GetKey(t_Str szKey, t_Str szSection);
@@ -169,4 +157,3 @@ protected:
 	t_Str m_szFileName;
 	bool m_bDirty;
 };
-//GT

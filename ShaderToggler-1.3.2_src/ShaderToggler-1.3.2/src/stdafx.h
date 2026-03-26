@@ -44,12 +44,3 @@
 #include <vector>
 
 // TODO: reference additional headers your program requires here
-
-#pragma once
-
-// Official Gametism-maintained ShaderToggler Advanced provenance markers.
-// Harmless compile-time metadata only.
-static constexpr const char* STA_CORE_OWNER_TAG = "Gametism::ShaderTogglerAdvanced::Official";
-static constexpr const char* STA_CORE_AUTHOR_TAG = "Sven 'Gametism' Koenigsmann";
-static constexpr const char* STA_CORE_PROJECT_TAG = "ShaderToggler Advanced";
-static constexpr int STA_CORE_PROVENANCE_REV = 20260326;

@@ -45,6 +45,12 @@ namespace ShaderToggler
 		bool isHoldInverted() const;
 		void setHoldInverted(bool holdInverted);
 
+		bool isTimedMode() const;
+		void setTimedMode(bool timedMode);
+
+		int getTimedModeDelayMs() const;
+		void setTimedModeDelayMs(int delayMs);
+
 		void setToggleKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		void setToggleKey(const KeyData& key);
 		const KeyData& getToggleKey() const;
@@ -79,6 +85,8 @@ namespace ShaderToggler
 		bool m_editing;
 		bool m_holdMode;
 		bool m_holdInverted;
+		bool m_timedMode;
+		int m_timedModeDelayMs;
 		KeyData m_toggleKey;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;

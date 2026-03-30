@@ -73,12 +73,13 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
-// 
+// Per-group hotkey edge/debounce state
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
 static const int g_groupHotkeyDebounceMs = 150;
 
-// 
+// Hold-to-cycle state with acceleration
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static std::chrono::steady_clock::time_point s_holdStartNP1, s_holdStartNP2, s_holdStartNP4, s_holdStartNP5, s_holdStartNP7, s_holdStartNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
@@ -92,7 +93,7 @@ static const int s_holdRepeatVeryFastMs = 35;
 static const char* GT_CREATOR = "Gametism";
 static const char* GT_CACHE_KEY = "CacheStamp";
 
-// 
+// Internal signature salt for CacheStamp (not written to the INI)
 static const char* GT_SIG_A = "STA";
 static const char* GT_SIG_B = "Gametism";
 static const char* GT_SIG_C = "ShaderToggler";
@@ -201,6 +202,8 @@ static std::string buildIniSignature()
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
 		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
 		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
+		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
+		data += "|TimedDelay=" + std::to_string(group.getTimedModeDelayMs());
 
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
 		appendSortedHashesToSignature(data, "V", group.getVertexShaderHashes());
@@ -677,6 +680,51 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
+		const bool isPressedNow = group.getToggleKey().isKeyPressed(runtime);
+		const auto nowTime = std::chrono::steady_clock::now();
+
+		if (group.isTimedMode())
+		{
+			if (isPressedNow)
+			{
+				const bool previousActive = group.isActive();
+				group.setActive(true);
+				g_groupLastTimedTriggerTime[group.getId()] = nowTime;
+
+				if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != true)
+				{
+					g_vertexShaderManager.toggleHideMarkedShaders();
+					g_pixelShaderManager.toggleHideMarkedShaders();
+					g_computeShaderManager.toggleHideMarkedShaders();
+				}
+			}
+
+			if (group.isActive())
+			{
+				auto it = g_groupLastTimedTriggerTime.find(group.getId());
+				if (it != g_groupLastTimedTriggerTime.end())
+				{
+					const auto elapsedMs =
+						std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - it->second).count();
+
+					if (elapsedMs >= group.getTimedModeDelayMs())
+					{
+						const bool previousActive = group.isActive();
+						group.setActive(false);
+
+						if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != false)
+						{
+							g_vertexShaderManager.toggleHideMarkedShaders();
+							g_pixelShaderManager.toggleHideMarkedShaders();
+							g_computeShaderManager.toggleHideMarkedShaders();
+						}
+					}
+				}
+			}
+
+			g_groupHotkeyWasDown[group.getId()] = isDownNow;
+			continue;
+		}
 
 		if (group.isHoldMode())
 		{
@@ -699,7 +747,6 @@ static void onReshadePresent(effect_runtime* runtime)
 		bool& wasDownLastFrame = g_groupHotkeyWasDown[group.getId()];
 		auto& lastToggleTime = g_groupHotkeyLastToggleTime[group.getId()];
 
-		const auto nowTime = std::chrono::steady_clock::now();
 		const auto msSinceLastToggle =
 			std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - lastToggleTime).count();
 
@@ -1081,7 +1128,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			ImGui::Text(" %s (%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str());
 
-			if (group.isHoldMode())
+			if (group.isTimedMode())
+			{
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.45f, 1.0f));
+				ImGui::Text(" Auto-hide ");
+				ImGui::PopStyleColor();
+			}
+			else if (group.isHoldMode())
 			{
 				ImGui::SameLine();
 				if (group.isHoldInverted())
@@ -1170,8 +1224,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				bool holdMode = group.isHoldMode();
-				ImGui::Checkbox("Only active while holding key", &holdMode);
-				group.setHoldMode(holdMode);
+				if (ImGui::Checkbox("Only active while holding key", &holdMode))
+				{
+					group.setHoldMode(holdMode);
+				}
 				ImGui::SameLine();
 				showHelpMarker("Useful for ADS / HUD hide behavior. The group stays active only while the hotkey is held.");
 				ImGui::PopItemWidth();
@@ -1186,6 +1242,31 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setHoldInverted(holdInverted);
 					ImGui::SameLine();
 					showHelpMarker("When enabled, the group is active normally and turns off only while the hotkey is held.");
+					ImGui::PopItemWidth();
+				}
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				bool timedMode = group.isTimedMode();
+				if (ImGui::Checkbox("Auto-hide mode", &timedMode))
+				{
+					group.setTimedMode(timedMode);
+				}
+				ImGui::SameLine();
+				showHelpMarker("Shows the group when the hotkey is pressed and hides it automatically after the chosen delay.");
+				ImGui::PopItemWidth();
+
+				if (group.isTimedMode())
+				{
+					int delayMs = group.getTimedModeDelayMs();
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.4f);
+					ImGui::Text("Hide delay");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					if (ImGui::SliderInt("##TimedModeDelayMs", &delayMs, 100, 10000, "%d ms"))
+					{
+						group.setTimedModeDelayMs(delayMs);
+					}
 					ImGui::PopItemWidth();
 				}
 
@@ -1226,6 +1307,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				g_groupHotkeyWasDown.erase(id);
 				g_groupHotkeyLastToggleTime.erase(id);
+				g_groupLastTimedTriggerTime.erase(id);
 			}
 
 			saveShaderTogglerIniFile();

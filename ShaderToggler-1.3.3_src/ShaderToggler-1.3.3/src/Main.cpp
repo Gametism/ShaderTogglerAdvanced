@@ -205,6 +205,19 @@ static bool isAnyTimedTriggerActive(const ToggleGroup& group, reshade::api::effe
 	return group.getToggleKey().isKeyPressed(runtime);
 }
 
+static void setGroupActiveWithEditRefresh(ToggleGroup& group, bool newActive)
+{
+	const bool previousActive = group.isActive();
+	group.setActive(newActive);
+
+	if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != newActive)
+	{
+		g_vertexShaderManager.toggleHideMarkedShaders();
+		g_pixelShaderManager.toggleHideMarkedShaders();
+		g_computeShaderManager.toggleHideMarkedShaders();
+	}
+}
+
 static std::string buildIniSignature()
 {
 	std::string data;
@@ -237,6 +250,7 @@ static std::string buildIniSignature()
 		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
 		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
 		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
+		data += "|TimedInverted=" + std::to_string(group.isTimedModeInverted() ? 1 : 0);
 		data += "|TimedDelay=" + std::to_string(group.getTimedModeDelayMs());
 		data += "|TimedMinVisible=" + std::to_string(group.getTimedModeMinVisibleMs());
 		data += "|TimedFadeOut=" + std::to_string(group.getTimedModeFadeOutMs());
@@ -728,28 +742,22 @@ static void onReshadePresent(effect_runtime* runtime)
 
 		if (group.isTimedMode())
 		{
+			const bool timedTargetActiveState = !group.isTimedModeInverted();
+			const bool timedRestingActiveState = group.isTimedModeInverted();
+
 			if (timedTriggerActiveNow)
 			{
-				const bool previousActive = group.isActive();
-
-				if (!previousActive)
+				if (group.isActive() != timedTargetActiveState)
 				{
 					g_groupTimedVisibleSince[group.getId()] = nowTime;
 				}
 
-				group.setActive(true);
+				setGroupActiveWithEditRefresh(group, timedTargetActiveState);
 				g_groupLastTimedTriggerTime[group.getId()] = nowTime;
 				g_groupTimedFadeOutStart.erase(group.getId());
-
-				if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != true)
-				{
-					g_vertexShaderManager.toggleHideMarkedShaders();
-					g_pixelShaderManager.toggleHideMarkedShaders();
-					g_computeShaderManager.toggleHideMarkedShaders();
-				}
 			}
 
-			if (group.isActive())
+			if (group.isActive() == timedTargetActiveState)
 			{
 				auto lastTriggerIt = g_groupLastTimedTriggerTime.find(group.getId());
 				auto visibleSinceIt = g_groupTimedVisibleSince.find(group.getId());
@@ -774,17 +782,9 @@ static void onReshadePresent(effect_runtime* runtime)
 					{
 						if (group.getTimedModeFadeOutMs() <= 0)
 						{
-							const bool previousActive = group.isActive();
-							group.setActive(false);
+							setGroupActiveWithEditRefresh(group, timedRestingActiveState);
 							g_groupTimedVisibleSince.erase(group.getId());
 							g_groupTimedFadeOutStart.erase(group.getId());
-
-							if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != false)
-							{
-								g_vertexShaderManager.toggleHideMarkedShaders();
-								g_pixelShaderManager.toggleHideMarkedShaders();
-								g_computeShaderManager.toggleHideMarkedShaders();
-							}
 						}
 						else
 						{
@@ -799,17 +799,9 @@ static void onReshadePresent(effect_runtime* runtime)
 
 								if (fadeElapsedMs >= group.getTimedModeFadeOutMs())
 								{
-									const bool previousActive = group.isActive();
-									group.setActive(false);
+									setGroupActiveWithEditRefresh(group, timedRestingActiveState);
 									g_groupTimedVisibleSince.erase(group.getId());
 									g_groupTimedFadeOutStart.erase(group.getId());
-
-									if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != false)
-									{
-										g_vertexShaderManager.toggleHideMarkedShaders();
-										g_pixelShaderManager.toggleHideMarkedShaders();
-										g_computeShaderManager.toggleHideMarkedShaders();
-									}
 								}
 							}
 						}
@@ -833,17 +825,7 @@ static void onReshadePresent(effect_runtime* runtime)
 		if (group.isHoldMode())
 		{
 			const bool desiredActive = group.isHoldInverted() ? !isDownNow : isDownNow;
-			const bool previousActive = group.isActive();
-
-			group.setActive(desiredActive);
-
-			if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != desiredActive)
-			{
-				g_vertexShaderManager.toggleHideMarkedShaders();
-				g_pixelShaderManager.toggleHideMarkedShaders();
-				g_computeShaderManager.toggleHideMarkedShaders();
-			}
-
+			setGroupActiveWithEditRefresh(group, desiredActive);
 			g_groupHotkeyWasDown[group.getId()] = isDownNow;
 			continue;
 		}
@@ -856,15 +838,8 @@ static void onReshadePresent(effect_runtime* runtime)
 
 		if (isDownNow && !wasDownLastFrame && msSinceLastToggle > g_groupHotkeyDebounceMs)
 		{
-			group.setActive(!group.isActive());
+			setGroupActiveWithEditRefresh(group, !group.isActive());
 			lastToggleTime = nowTime;
-
-			if (group.getId() == g_toggleGroupIdShaderEditing)
-			{
-				g_vertexShaderManager.toggleHideMarkedShaders();
-				g_pixelShaderManager.toggleHideMarkedShaders();
-				g_computeShaderManager.toggleHideMarkedShaders();
-			}
 		}
 
 		wasDownLastFrame = isDownNow;
@@ -1285,7 +1260,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			{
 				ImGui::SameLine();
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.45f, 1.0f));
-				ImGui::Text(" Auto-hide ");
+				ImGui::Text(group.isTimedModeInverted() ? " Auto-show " : " Auto-hide ");
 				ImGui::PopStyleColor();
 
 				if (g_groupTimedFadeOutStart.find(group.getId()) != g_groupTimedFadeOutStart.end())
@@ -1375,7 +1350,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 				ImGui::Text("Timed triggers");
 				ImGui::SameLine();
-				showHelpMarker("Each trigger can either activate on press, refresh while held, or do both. If none are set, auto-hide falls back to the main hotkey.");
+				showHelpMarker("Each trigger can either activate on press, refresh while held, or do both. If none are set, timed mode falls back to the main hotkey.");
 
 				for (size_t triggerIndex = 0; triggerIndex < group.getTimedTriggerKeyCount(); ++triggerIndex)
 				{
@@ -1531,14 +1506,26 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setTimedMode(timedMode);
 				}
 				ImGui::SameLine();
-				showHelpMarker("Shows the group when any timed trigger activates and hides it automatically after the chosen delay.");
+				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used.");
 				ImGui::PopItemWidth();
 
 				if (group.isTimedMode())
 				{
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					bool timedModeInverted = group.isTimedModeInverted();
+					if (ImGui::Checkbox("Invert auto-hide behavior", &timedModeInverted))
+					{
+						group.setTimedModeInverted(timedModeInverted);
+					}
+					ImGui::SameLine();
+					showHelpMarker("Useful for HUD hide groups. When enabled, the group stays active normally and temporarily turns off when triggered.");
+					ImGui::PopItemWidth();
+
 					int delayMs = group.getTimedModeDelayMs();
 					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.4f);
-					ImGui::Text("Hide delay");
+					ImGui::Text(group.isTimedModeInverted() ? "Show time" : "Hide delay");
 					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 					if (ImGui::SliderInt("##TimedModeDelayMs", &delayMs, 100, 10000, "%d ms"))
 					{
@@ -1548,14 +1535,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 					int minVisibleMs = group.getTimedModeMinVisibleMs();
 					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.4f);
-					ImGui::Text("Minimum visible");
+					ImGui::Text(group.isTimedModeInverted() ? "Minimum shown" : "Minimum visible");
 					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 					if (ImGui::SliderInt("##TimedModeMinVisibleMs", &minVisibleMs, 0, 5000, "%d ms"))
 					{
 						group.setTimedModeMinVisibleMs(minVisibleMs);
 					}
 					ImGui::SameLine();
-					showHelpMarker("Prevents the HUD from disappearing too quickly after being shown.");
+					showHelpMarker("Prevents the temporary timed state from ending too quickly.");
 					ImGui::PopItemWidth();
 
 					int fadeOutMs = group.getTimedModeFadeOutMs();
@@ -1567,7 +1554,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						group.setTimedModeFadeOutMs(fadeOutMs);
 					}
 					ImGui::SameLine();
-					showHelpMarker("This is a soft fade-out state. The HUD remains visible a bit longer before the final hard hide.");
+					showHelpMarker("The temporary timed state stays a bit longer before returning to the resting state.");
 					ImGui::PopItemWidth();
 				}
 

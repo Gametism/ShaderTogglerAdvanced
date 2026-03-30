@@ -62,6 +62,9 @@ namespace ShaderToggler
 		bool isTimedMode() const;
 		void setTimedMode(bool timedMode);
 
+		bool isTimedModeInverted() const;
+		void setTimedModeInverted(bool inverted);
+
 		int getTimedModeDelayMs() const;
 		void setTimedModeDelayMs(int delayMs);
 
@@ -124,6 +127,7 @@ namespace ShaderToggler
 		bool m_holdMode;
 		bool m_holdInverted;
 		bool m_timedMode;
+		bool m_timedModeInverted;
 		int m_timedModeDelayMs;
 		int m_timedModeMinVisibleMs;
 		int m_timedModeFadeOutMs;

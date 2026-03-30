@@ -30,6 +30,7 @@ namespace ShaderToggler
 		, m_holdMode(false)
 		, m_holdInverted(false)
 		, m_timedMode(false)
+		, m_timedModeInverted(false)
 		, m_timedModeDelayMs(1500)
 		, m_timedModeMinVisibleMs(250)
 		, m_timedModeFadeOutMs(150)
@@ -88,6 +89,12 @@ namespace ShaderToggler
 			m_holdMode = false;
 			m_holdInverted = false;
 		}
+	}
+
+	bool ToggleGroup::isTimedModeInverted() const { return m_timedModeInverted; }
+	void ToggleGroup::setTimedModeInverted(bool inverted)
+	{
+		m_timedModeInverted = inverted;
 	}
 
 	int ToggleGroup::getTimedModeDelayMs() const { return m_timedModeDelayMs; }
@@ -303,6 +310,7 @@ namespace ShaderToggler
 		m_holdMode = false;
 		m_holdInverted = false;
 		m_timedMode = false;
+		m_timedModeInverted = false;
 		m_timedModeDelayMs = 1500;
 		m_timedModeMinVisibleMs = 250;
 		m_timedModeFadeOutMs = 150;
@@ -339,6 +347,7 @@ namespace ShaderToggler
 			m_holdMode = false;
 			m_holdInverted = false;
 			m_timedMode = false;
+			m_timedModeInverted = false;
 			m_timedModeDelayMs = 1500;
 			m_timedModeMinVisibleMs = 250;
 			m_timedModeFadeOutMs = 150;
@@ -437,6 +446,12 @@ namespace ShaderToggler
 		else
 			m_timedMode = false;
 
+		const std::string timedModeInvertedValue = iniFile.GetValue("TimedModeInverted", sectionRoot);
+		if (!timedModeInvertedValue.empty())
+			m_timedModeInverted = iniFile.GetBool("TimedModeInverted", sectionRoot);
+		else
+			m_timedModeInverted = false;
+
 		const int timedDelayValue = iniFile.GetInt("TimedModeDelayMs", sectionRoot);
 		if (timedDelayValue != INT_MIN)
 			m_timedModeDelayMs = (timedDelayValue < 100) ? 100 : timedDelayValue;
@@ -525,6 +540,7 @@ namespace ShaderToggler
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
 		iniFile.SetBool("TimedMode", m_timedMode, "", sectionRoot);
+		iniFile.SetBool("TimedModeInverted", m_timedModeInverted, "", sectionRoot);
 		iniFile.SetInt("TimedModeDelayMs", m_timedModeDelayMs, "", sectionRoot);
 		iniFile.SetInt("TimedModeMinVisibleMs", m_timedModeMinVisibleMs, "", sectionRoot);
 		iniFile.SetInt("TimedModeFadeOutMs", m_timedModeFadeOutMs, "", sectionRoot);

@@ -48,9 +48,9 @@ namespace ShaderToggler
 
 		bool isKeyPressed(const reshade::api::effect_runtime* runtime) const;
 
-		std::string getKeyAsString() { return _keyAsString; }
-		uint8_t getKeyCode() { return _keyCode; }
-		bool isValid() { return _keyCode > 0; }
+		std::string getKeyAsString() const { return _keyAsString; }
+		uint8_t getKeyCode() const { return _keyCode; }
+		bool isValid() const { return _keyCode > 0; }
 
 		std::string toString() const;
 		int toInt() const;

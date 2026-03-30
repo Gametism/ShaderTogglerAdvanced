@@ -117,6 +117,135 @@ namespace ShaderToggler
 		return m_toggleKey.toString();
 	}
 
+	void ToggleGroup::addTimedTriggerKey(const KeyData& key, TimedTriggerMode mode)
+	{
+		if (!key.isValid())
+			return;
+
+		TimedTriggerBinding binding;
+		binding.key = key;
+		binding.mode = mode;
+		m_timedTriggerKeys.push_back(binding);
+	}
+
+	void ToggleGroup::setTimedTriggerKeyAt(size_t index, const KeyData& key)
+	{
+		if (!key.isValid())
+			return;
+
+		if (index < m_timedTriggerKeys.size())
+		{
+			m_timedTriggerKeys[index].key = key;
+		}
+		else if (index == m_timedTriggerKeys.size())
+		{
+			addTimedTriggerKey(key, TimedTriggerMode::OnPress);
+		}
+	}
+
+	void ToggleGroup::setTimedTriggerModeAt(size_t index, TimedTriggerMode mode)
+	{
+		if (index < m_timedTriggerKeys.size())
+			m_timedTriggerKeys[index].mode = mode;
+	}
+
+	void ToggleGroup::setTimedTriggerBindingAt(size_t index, const TimedTriggerBinding& binding)
+	{
+		if (!binding.key.isValid())
+			return;
+
+		if (index < m_timedTriggerKeys.size())
+		{
+			m_timedTriggerKeys[index] = binding;
+		}
+		else if (index == m_timedTriggerKeys.size())
+		{
+			m_timedTriggerKeys.push_back(binding);
+		}
+	}
+
+	void ToggleGroup::removeTimedTriggerKeyAt(size_t index)
+	{
+		if (index >= m_timedTriggerKeys.size())
+			return;
+
+		m_timedTriggerKeys.erase(m_timedTriggerKeys.begin() + static_cast<std::ptrdiff_t>(index));
+	}
+
+	void ToggleGroup::clearTimedTriggerKeys()
+	{
+		m_timedTriggerKeys.clear();
+	}
+
+	bool ToggleGroup::hasTimedTriggerKeys() const
+	{
+		return !m_timedTriggerKeys.empty();
+	}
+
+	size_t ToggleGroup::getTimedTriggerKeyCount() const
+	{
+		return m_timedTriggerKeys.size();
+	}
+
+	const KeyData& ToggleGroup::getTimedTriggerKeyAt(size_t index) const
+	{
+		return m_timedTriggerKeys.at(index).key;
+	}
+
+	std::string ToggleGroup::getTimedTriggerKeyAsString(size_t index) const
+	{
+		return m_timedTriggerKeys.at(index).key.toString();
+	}
+
+	ToggleGroup::TimedTriggerMode ToggleGroup::getTimedTriggerModeAt(size_t index) const
+	{
+		return m_timedTriggerKeys.at(index).mode;
+	}
+
+	const ToggleGroup::TimedTriggerBinding& ToggleGroup::getTimedTriggerBindingAt(size_t index) const
+	{
+		return m_timedTriggerKeys.at(index);
+	}
+
+	const std::vector<ToggleGroup::TimedTriggerBinding>& ToggleGroup::getTimedTriggerKeys() const
+	{
+		return m_timedTriggerKeys;
+	}
+
+	const char* ToggleGroup::timedTriggerModeToString(TimedTriggerMode mode)
+	{
+		switch (mode)
+		{
+		case TimedTriggerMode::OnPress:
+			return "On press";
+		case TimedTriggerMode::WhileHeld:
+			return "While held";
+		case TimedTriggerMode::PressAndHold:
+			return "Press + hold";
+		default:
+			return "On press";
+		}
+	}
+
+	int ToggleGroup::timedTriggerModeToInt(TimedTriggerMode mode)
+	{
+		return static_cast<int>(mode);
+	}
+
+	ToggleGroup::TimedTriggerMode ToggleGroup::timedTriggerModeFromInt(int value)
+	{
+		switch (value)
+		{
+		case 1:
+			return TimedTriggerMode::WhileHeld;
+		case 2:
+			return TimedTriggerMode::PressAndHold;
+		case 0:
+		default:
+			return TimedTriggerMode::OnPress;
+		}
+	}
+
 	void ToggleGroup::clearHashes()
 	{
 		m_pixelShaderHashes.clear();
@@ -155,6 +284,7 @@ namespace ShaderToggler
 		m_holdInverted = false;
 		m_timedMode = false;
 		m_timedModeDelayMs = 1500;
+		m_timedTriggerKeys.clear();
 
 		if (index < 0)
 		{
@@ -189,6 +319,7 @@ namespace ShaderToggler
 			m_timedMode = false;
 			m_timedModeDelayMs = 1500;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
+			m_timedTriggerKeys.clear();
 			return;
 		}
 //GT
@@ -231,6 +362,35 @@ namespace ShaderToggler
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 		else
 			m_toggleKey = KeyData::fromInt(toggleKeyValue);
+
+		const std::vector<uint32_t> timedTriggerKeyValues = iniFile.GetArray("TimedTriggerKeys", sectionRoot);
+		const std::vector<uint32_t> timedTriggerModeValues = iniFile.GetArray("TimedTriggerModes", sectionRoot);
+
+		if (!timedTriggerKeyValues.empty())
+		{
+			for (size_t i = 0; i < timedTriggerKeyValues.size(); ++i)
+			{
+				KeyData key = KeyData::fromInt(timedTriggerKeyValues[i]);
+				if (!key.isValid())
+					continue;
+
+				TimedTriggerMode mode = TimedTriggerMode::OnPress;
+				if (i < timedTriggerModeValues.size())
+					mode = timedTriggerModeFromInt(static_cast<int>(timedTriggerModeValues[i]));
+
+				addTimedTriggerKey(key, mode);
+			}
+		}
+		else
+		{
+			const uint32_t legacyTimedTriggerKeyValue = iniFile.GetUInt("TimedTriggerKey", sectionRoot);
+			if (legacyTimedTriggerKeyValue != UINT_MAX)
+			{
+				KeyData key = KeyData::fromInt(legacyTimedTriggerKeyValue);
+				if (key.isValid())
+					addTimedTriggerKey(key, TimedTriggerMode::OnPress);
+			}
+		}
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
@@ -303,6 +463,28 @@ namespace ShaderToggler
 
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
+
+		if (!m_timedTriggerKeys.empty())
+		{
+			std::vector<uint32_t> timedTriggerKeyValues;
+			std::vector<uint32_t> timedTriggerModeValues;
+
+			timedTriggerKeyValues.reserve(m_timedTriggerKeys.size());
+			timedTriggerModeValues.reserve(m_timedTriggerKeys.size());
+
+			for (const TimedTriggerBinding& binding : m_timedTriggerKeys)
+			{
+				if (!binding.key.isValid())
+					continue;
+
+				timedTriggerKeyValues.push_back(static_cast<uint32_t>(binding.key.toInt()));
+				timedTriggerModeValues.push_back(static_cast<uint32_t>(timedTriggerModeToInt(binding.mode)));
+			}
+
+			iniFile.SetArray("TimedTriggerKeys", timedTriggerKeyValues, "", sectionRoot);
+			iniFile.SetArray("TimedTriggerModes", timedTriggerModeValues, "", sectionRoot);
+		}
+
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <unordered_set>
 #include <reshade.hpp>
 #include "ShaderManager.h"
@@ -18,6 +19,19 @@ namespace ShaderToggler
 	{
 	public:
 		using GroupId = int;
+
+		enum class TimedTriggerMode
+		{
+			OnPress = 0,
+			WhileHeld = 1,
+			PressAndHold = 2
+		};
+
+		struct TimedTriggerBinding
+		{
+			KeyData key;
+			TimedTriggerMode mode = TimedTriggerMode::OnPress;
+		};
 
 		ToggleGroup(const std::string& name, GroupId id);
 		ToggleGroup(const ToggleGroup& other) = default;
@@ -56,6 +70,24 @@ namespace ShaderToggler
 		const KeyData& getToggleKey() const;
 		std::string getToggleKeyAsString() const;
 
+		void addTimedTriggerKey(const KeyData& key, TimedTriggerMode mode = TimedTriggerMode::OnPress);
+		void setTimedTriggerKeyAt(size_t index, const KeyData& key);
+		void setTimedTriggerModeAt(size_t index, TimedTriggerMode mode);
+		void setTimedTriggerBindingAt(size_t index, const TimedTriggerBinding& binding);
+		void removeTimedTriggerKeyAt(size_t index);
+		void clearTimedTriggerKeys();
+		bool hasTimedTriggerKeys() const;
+		size_t getTimedTriggerKeyCount() const;
+		const KeyData& getTimedTriggerKeyAt(size_t index) const;
+		std::string getTimedTriggerKeyAsString(size_t index) const;
+		TimedTriggerMode getTimedTriggerModeAt(size_t index) const;
+		const TimedTriggerBinding& getTimedTriggerBindingAt(size_t index) const;
+		const std::vector<TimedTriggerBinding>& getTimedTriggerKeys() const;
+
+		static const char* timedTriggerModeToString(TimedTriggerMode mode);
+		static int timedTriggerModeToInt(TimedTriggerMode mode);
+		static TimedTriggerMode timedTriggerModeFromInt(int value);
+
 		void clearHashes();
 		void storeCollectedHashes(
 			const std::unordered_set<uint32_t>& pixel,
@@ -71,7 +103,7 @@ namespace ShaderToggler
 
 		ToggleGroup makeDuplicate() const;
 
-		// Harmless provenance accessors for diagnostics/ownership continuity.
+		// 
 		static constexpr const char* getProvenanceOwnerTag() { return STA_TOGGLEGROUP_OWNER_TAG; }
 		static constexpr const char* getProvenanceAuthorTag() { return STA_TOGGLEGROUP_AUTHOR_TAG; }
 		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
@@ -88,6 +120,7 @@ namespace ShaderToggler
 		bool m_timedMode;
 		int m_timedModeDelayMs;
 		KeyData m_toggleKey;
+		std::vector<TimedTriggerBinding> m_timedTriggerKeys;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;

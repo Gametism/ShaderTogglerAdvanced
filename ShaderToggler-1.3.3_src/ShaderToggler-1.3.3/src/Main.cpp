@@ -68,6 +68,8 @@ static KeyData g_keyCollector;
 static std::atomic_uint32_t g_activeCollectorFrameCounter = 0;
 static std::vector<ToggleGroup> g_toggleGroups;
 static std::atomic_int g_toggleGroupIdKeyBindingEditing = -1;
+static std::atomic_int g_toggleGroupIdTimedTriggerKeyEditing = -1;
+static std::atomic_int g_toggleGroupTimedTriggerKeySlotEditing = -1;
 static std::atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
@@ -171,6 +173,36 @@ static void appendSortedHashesToSignature(std::string& data, const char* prefix,
 	}
 }
 
+static bool isTimedTriggerBindingActive(const ToggleGroup::TimedTriggerBinding& binding, reshade::api::effect_runtime* runtime)
+{
+	switch (binding.mode)
+	{
+	case ToggleGroup::TimedTriggerMode::OnPress:
+		return binding.key.isKeyPressed(runtime);
+	case ToggleGroup::TimedTriggerMode::WhileHeld:
+		return binding.key.isKeyDown(runtime);
+	case ToggleGroup::TimedTriggerMode::PressAndHold:
+		return binding.key.isKeyPressed(runtime) || binding.key.isKeyDown(runtime);
+	default:
+		return binding.key.isKeyPressed(runtime);
+	}
+}
+
+static bool isAnyTimedTriggerActive(const ToggleGroup& group, reshade::api::effect_runtime* runtime)
+{
+	if (group.hasTimedTriggerKeys())
+	{
+		for (size_t i = 0; i < group.getTimedTriggerKeyCount(); ++i)
+		{
+			if (isTimedTriggerBindingActive(group.getTimedTriggerBindingAt(i), runtime))
+				return true;
+		}
+		return false;
+	}
+
+	return group.getToggleKey().isKeyPressed(runtime);
+}
+
 static std::string buildIniSignature()
 {
 	std::string data;
@@ -204,6 +236,13 @@ static std::string buildIniSignature()
 		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
 		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
 		data += "|TimedDelay=" + std::to_string(group.getTimedModeDelayMs());
+		data += "|TimedTriggerCount=" + std::to_string(group.getTimedTriggerKeyCount());
+
+		for (size_t i = 0; i < group.getTimedTriggerKeyCount(); ++i)
+		{
+			data += "|TimedTriggerKey" + std::to_string(i) + "=" + std::to_string(group.getTimedTriggerKeyAt(i).toInt());
+			data += "|TimedTriggerMode" + std::to_string(i) + "=" + std::to_string(ToggleGroup::timedTriggerModeToInt(group.getTimedTriggerModeAt(i)));
+		}
 
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
 		appendSortedHashesToSignature(data, "V", group.getVertexShaderHashes());
@@ -680,12 +719,12 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
-		const bool isPressedNow = group.getToggleKey().isKeyPressed(runtime);
+		const bool timedTriggerActiveNow = isAnyTimedTriggerActive(group, runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
 
 		if (group.isTimedMode())
 		{
-			if (isPressedNow)
+			if (timedTriggerActiveNow)
 			{
 				const bool previousActive = group.isActive();
 				group.setActive(true);
@@ -935,7 +974,56 @@ void startKeyBindingEditing(ToggleGroup& groupEditing)
 	{
 		endKeyBindingEditing(false, groupEditing);
 	}
+	if (g_toggleGroupIdTimedTriggerKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedTriggerKeyEditing = -1;
+		g_toggleGroupTimedTriggerKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
 	g_toggleGroupIdKeyBindingEditing = groupEditing.getId();
+}
+
+void endTimedTriggerKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
+{
+	if (acceptCollectedBinding &&
+		g_toggleGroupIdTimedTriggerKeyEditing == groupEditing.getId() &&
+		g_toggleGroupTimedTriggerKeySlotEditing >= 0 &&
+		g_keyCollector.isValid())
+	{
+		if (g_toggleGroupTimedTriggerKeySlotEditing < static_cast<int>(groupEditing.getTimedTriggerKeyCount()))
+		{
+			auto binding = groupEditing.getTimedTriggerBindingAt(static_cast<size_t>(g_toggleGroupTimedTriggerKeySlotEditing));
+			binding.key = g_keyCollector;
+			groupEditing.setTimedTriggerBindingAt(static_cast<size_t>(g_toggleGroupTimedTriggerKeySlotEditing), binding);
+		}
+		else
+		{
+			groupEditing.addTimedTriggerKey(g_keyCollector, ToggleGroup::TimedTriggerMode::OnPress);
+		}
+	}
+	g_toggleGroupIdTimedTriggerKeyEditing = -1;
+	g_toggleGroupTimedTriggerKeySlotEditing = -1;
+	g_keyCollector.clear();
+}
+
+void startTimedTriggerKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex)
+{
+	if (g_toggleGroupIdTimedTriggerKeyEditing == groupEditing.getId() &&
+		g_toggleGroupTimedTriggerKeySlotEditing == slotIndex)
+	{
+		return;
+	}
+	if (g_toggleGroupIdTimedTriggerKeyEditing >= 0)
+	{
+		endTimedTriggerKeyBindingEditing(false, groupEditing);
+	}
+	if (g_toggleGroupIdKeyBindingEditing >= 0)
+	{
+		g_toggleGroupIdKeyBindingEditing = -1;
+		g_keyCollector.clear();
+	}
+	g_toggleGroupIdTimedTriggerKeyEditing = groupEditing.getId();
+	g_toggleGroupTimedTriggerKeySlotEditing = slotIndex;
 }
 
 void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
@@ -991,7 +1079,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 {
 	applyModernUiStyle();
 
-	if (g_toggleGroupIdKeyBindingEditing >= 0)
+	if (g_toggleGroupIdKeyBindingEditing >= 0 || g_toggleGroupIdTimedTriggerKeyEditing >= 0)
 	{
 		g_keyCollector.collectKeysPressed(runtime);
 	}
@@ -1212,6 +1300,122 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				}
 				ImGui::PopItemWidth();
 
+				ImGui::Text("Timed triggers");
+				ImGui::SameLine();
+				showHelpMarker("Each trigger can either activate on press, refresh while held, or do both. If none are set, auto-hide falls back to the main hotkey.");
+
+				for (size_t triggerIndex = 0; triggerIndex < group.getTimedTriggerKeyCount(); ++triggerIndex)
+				{
+					ImGui::PushID(static_cast<int>(triggerIndex));
+
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+
+					std::string timedTriggerTextBoxContents =
+						(g_toggleGroupIdTimedTriggerKeyEditing == group.getId() &&
+						 g_toggleGroupTimedTriggerKeySlotEditing == static_cast<int>(triggerIndex))
+							? g_keyCollector.getKeyAsString()
+							: group.getTimedTriggerKeyAsString(triggerIndex);
+
+					char timedTriggerBuf[128] = {};
+					strncpy_s(timedTriggerBuf, sizeof(timedTriggerBuf), timedTriggerTextBoxContents.c_str(), _TRUNCATE);
+					ImGui::InputText("##TimedTrigger", timedTriggerBuf, sizeof(timedTriggerBuf), ImGuiInputTextFlags_ReadOnly);
+
+					if (ImGui::IsItemClicked())
+					{
+						startTimedTriggerKeyBindingEditing(group, static_cast<int>(triggerIndex));
+					}
+
+					if (g_toggleGroupIdTimedTriggerKeyEditing == group.getId() &&
+						g_toggleGroupTimedTriggerKeySlotEditing == static_cast<int>(triggerIndex))
+					{
+						isKeyEditing = true;
+						ImGui::SameLine();
+						if (ImGui::Button("OK##TimedTrigger"))
+						{
+							endTimedTriggerKeyBindingEditing(true, group);
+						}
+						ImGui::SameLine();
+						if (ImGui::Button("Cancel##TimedTrigger"))
+						{
+							endTimedTriggerKeyBindingEditing(false, group);
+						}
+					}
+
+					ImGui::SameLine();
+					int triggerMode = ToggleGroup::timedTriggerModeToInt(group.getTimedTriggerModeAt(triggerIndex));
+					const char* modeItems[] = { "On press", "While held", "Press + hold" };
+					ImGui::SetNextItemWidth(140.0f);
+					if (ImGui::Combo("##TimedTriggerMode", &triggerMode, modeItems, IM_ARRAYSIZE(modeItems)))
+					{
+						group.setTimedTriggerModeAt(triggerIndex, ToggleGroup::timedTriggerModeFromInt(triggerMode));
+					}
+
+					ImGui::SameLine();
+					if (ImGui::Button("Remove"))
+					{
+						group.removeTimedTriggerKeyAt(triggerIndex);
+
+						if (g_toggleGroupIdTimedTriggerKeyEditing == group.getId())
+						{
+							if (g_toggleGroupTimedTriggerKeySlotEditing == static_cast<int>(triggerIndex))
+							{
+								g_toggleGroupIdTimedTriggerKeyEditing = -1;
+								g_toggleGroupTimedTriggerKeySlotEditing = -1;
+								g_keyCollector.clear();
+							}
+							else if (g_toggleGroupTimedTriggerKeySlotEditing > static_cast<int>(triggerIndex))
+							{
+								--g_toggleGroupTimedTriggerKeySlotEditing;
+							}
+						}
+
+						ImGui::PopItemWidth();
+						ImGui::PopID();
+						break;
+					}
+
+					ImGui::PopItemWidth();
+					ImGui::PopID();
+				}
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+
+				std::string addTriggerText =
+					(g_toggleGroupIdTimedTriggerKeyEditing == group.getId() &&
+					 g_toggleGroupTimedTriggerKeySlotEditing == static_cast<int>(group.getTimedTriggerKeyCount()))
+						? g_keyCollector.getKeyAsString()
+						: std::string("Add timed trigger");
+
+				char addTriggerBuf[128] = {};
+				strncpy_s(addTriggerBuf, sizeof(addTriggerBuf), addTriggerText.c_str(), _TRUNCATE);
+				ImGui::InputText("##AddTimedTrigger", addTriggerBuf, sizeof(addTriggerBuf), ImGuiInputTextFlags_ReadOnly);
+
+				if (ImGui::IsItemClicked())
+				{
+					startTimedTriggerKeyBindingEditing(group, static_cast<int>(group.getTimedTriggerKeyCount()));
+				}
+
+				if (g_toggleGroupIdTimedTriggerKeyEditing == group.getId() &&
+					g_toggleGroupTimedTriggerKeySlotEditing == static_cast<int>(group.getTimedTriggerKeyCount()))
+				{
+					isKeyEditing = true;
+					ImGui::SameLine();
+					if (ImGui::Button("OK##AddTimedTrigger"))
+					{
+						endTimedTriggerKeyBindingEditing(true, group);
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Cancel##AddTimedTrigger"))
+					{
+						endTimedTriggerKeyBindingEditing(false, group);
+					}
+				}
+				ImGui::PopItemWidth();
+
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
@@ -1254,7 +1458,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setTimedMode(timedMode);
 				}
 				ImGui::SameLine();
-				showHelpMarker("Shows the group when the hotkey is pressed and hides it automatically after the chosen delay.");
+				showHelpMarker("Shows the group when any timed trigger activates and hides it automatically after the chosen delay.");
 				ImGui::PopItemWidth();
 
 				if (group.isTimedMode())
@@ -1276,6 +1480,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					{
 						group.setEditing(false);
 						g_toggleGroupIdKeyBindingEditing = -1;
+						g_toggleGroupIdTimedTriggerKeyEditing = -1;
+						g_toggleGroupTimedTriggerKeySlotEditing = -1;
 						g_keyCollector.clear();
 						saveShaderTogglerIniFile();
 					}
@@ -1289,6 +1495,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		if (!idsToRemove.empty())
 		{
 			g_toggleGroupIdKeyBindingEditing = -1;
+			g_toggleGroupIdTimedTriggerKeyEditing = -1;
+			g_toggleGroupTimedTriggerKeySlotEditing = -1;
 			g_keyCollector.clear();
 			g_toggleGroupIdShaderEditing = -1;
 			g_pixelShaderManager.stopHuntingMode();

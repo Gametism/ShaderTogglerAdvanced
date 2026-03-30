@@ -31,6 +31,8 @@ namespace ShaderToggler
 		, m_holdInverted(false)
 		, m_timedMode(false)
 		, m_timedModeDelayMs(1500)
+		, m_timedModeMinVisibleMs(250)
+		, m_timedModeFadeOutMs(150)
 	{
 		(void)preserve_togglegroup_provenance();
 	}
@@ -95,6 +97,24 @@ namespace ShaderToggler
 			delayMs = 100;
 
 		m_timedModeDelayMs = delayMs;
+	}
+
+	int ToggleGroup::getTimedModeMinVisibleMs() const { return m_timedModeMinVisibleMs; }
+	void ToggleGroup::setTimedModeMinVisibleMs(int visibleMs)
+	{
+		if (visibleMs < 0)
+			visibleMs = 0;
+
+		m_timedModeMinVisibleMs = visibleMs;
+	}
+
+	int ToggleGroup::getTimedModeFadeOutMs() const { return m_timedModeFadeOutMs; }
+	void ToggleGroup::setTimedModeFadeOutMs(int fadeOutMs)
+	{
+		if (fadeOutMs < 0)
+			fadeOutMs = 0;
+
+		m_timedModeFadeOutMs = fadeOutMs;
 	}
 //GT
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
@@ -284,6 +304,8 @@ namespace ShaderToggler
 		m_holdInverted = false;
 		m_timedMode = false;
 		m_timedModeDelayMs = 1500;
+		m_timedModeMinVisibleMs = 250;
+		m_timedModeFadeOutMs = 150;
 		m_timedTriggerKeys.clear();
 
 		if (index < 0)
@@ -318,6 +340,8 @@ namespace ShaderToggler
 			m_holdInverted = false;
 			m_timedMode = false;
 			m_timedModeDelayMs = 1500;
+			m_timedModeMinVisibleMs = 250;
+			m_timedModeFadeOutMs = 150;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			m_timedTriggerKeys.clear();
 			return;
@@ -419,6 +443,18 @@ namespace ShaderToggler
 		else
 			m_timedModeDelayMs = 1500;
 
+		const int minVisibleValue = iniFile.GetInt("TimedModeMinVisibleMs", sectionRoot);
+		if (minVisibleValue != INT_MIN)
+			m_timedModeMinVisibleMs = (minVisibleValue < 0) ? 0 : minVisibleValue;
+		else
+			m_timedModeMinVisibleMs = 250;
+
+		const int fadeOutValue = iniFile.GetInt("TimedModeFadeOutMs", sectionRoot);
+		if (fadeOutValue != INT_MIN)
+			m_timedModeFadeOutMs = (fadeOutValue < 0) ? 0 : fadeOutValue;
+		else
+			m_timedModeFadeOutMs = 150;
+
 		if (m_holdInverted)
 			m_holdMode = true;
 
@@ -490,6 +526,8 @@ namespace ShaderToggler
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
 		iniFile.SetBool("TimedMode", m_timedMode, "", sectionRoot);
 		iniFile.SetInt("TimedModeDelayMs", m_timedModeDelayMs, "", sectionRoot);
+		iniFile.SetInt("TimedModeMinVisibleMs", m_timedModeMinVisibleMs, "", sectionRoot);
+		iniFile.SetInt("TimedModeFadeOutMs", m_timedModeFadeOutMs, "", sectionRoot);
 	}
 }
 //GT

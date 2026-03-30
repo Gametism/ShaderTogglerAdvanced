@@ -79,6 +79,8 @@ static std::string g_iniFileName = "";
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedVisibleSince;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
 static const int g_groupHotkeyDebounceMs = 150;
 
 // Hold-to-cycle state with acceleration
@@ -236,6 +238,8 @@ static std::string buildIniSignature()
 		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
 		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
 		data += "|TimedDelay=" + std::to_string(group.getTimedModeDelayMs());
+		data += "|TimedMinVisible=" + std::to_string(group.getTimedModeMinVisibleMs());
+		data += "|TimedFadeOut=" + std::to_string(group.getTimedModeFadeOutMs());
 		data += "|TimedTriggerCount=" + std::to_string(group.getTimedTriggerKeyCount());
 
 		for (size_t i = 0; i < group.getTimedTriggerKeyCount(); ++i)
@@ -727,8 +731,15 @@ static void onReshadePresent(effect_runtime* runtime)
 			if (timedTriggerActiveNow)
 			{
 				const bool previousActive = group.isActive();
+
+				if (!previousActive)
+				{
+					g_groupTimedVisibleSince[group.getId()] = nowTime;
+				}
+
 				group.setActive(true);
 				g_groupLastTimedTriggerTime[group.getId()] = nowTime;
+				g_groupTimedFadeOutStart.erase(group.getId());
 
 				if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != true)
 				{
@@ -740,25 +751,79 @@ static void onReshadePresent(effect_runtime* runtime)
 
 			if (group.isActive())
 			{
-				auto it = g_groupLastTimedTriggerTime.find(group.getId());
-				if (it != g_groupLastTimedTriggerTime.end())
+				auto lastTriggerIt = g_groupLastTimedTriggerTime.find(group.getId());
+				auto visibleSinceIt = g_groupTimedVisibleSince.find(group.getId());
+				auto fadeOutIt = g_groupTimedFadeOutStart.find(group.getId());
+
+				if (lastTriggerIt != g_groupLastTimedTriggerTime.end())
 				{
-					const auto elapsedMs =
-						std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - it->second).count();
+					const auto elapsedSinceLastTriggerMs =
+						std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - lastTriggerIt->second).count();
 
-					if (elapsedMs >= group.getTimedModeDelayMs())
+					long long elapsedVisibleMs = 0;
+					if (visibleSinceIt != g_groupTimedVisibleSince.end())
 					{
-						const bool previousActive = group.isActive();
-						group.setActive(false);
+						elapsedVisibleMs =
+							std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - visibleSinceIt->second).count();
+					}
 
-						if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != false)
+					const bool hideDelayExpired = elapsedSinceLastTriggerMs >= group.getTimedModeDelayMs();
+					const bool minVisibleExpired = elapsedVisibleMs >= group.getTimedModeMinVisibleMs();
+
+					if (hideDelayExpired && minVisibleExpired)
+					{
+						if (group.getTimedModeFadeOutMs() <= 0)
 						{
-							g_vertexShaderManager.toggleHideMarkedShaders();
-							g_pixelShaderManager.toggleHideMarkedShaders();
-							g_computeShaderManager.toggleHideMarkedShaders();
+							const bool previousActive = group.isActive();
+							group.setActive(false);
+							g_groupTimedVisibleSince.erase(group.getId());
+							g_groupTimedFadeOutStart.erase(group.getId());
+
+							if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != false)
+							{
+								g_vertexShaderManager.toggleHideMarkedShaders();
+								g_pixelShaderManager.toggleHideMarkedShaders();
+								g_computeShaderManager.toggleHideMarkedShaders();
+							}
+						}
+						else
+						{
+							if (fadeOutIt == g_groupTimedFadeOutStart.end())
+							{
+								g_groupTimedFadeOutStart[group.getId()] = nowTime;
+							}
+							else
+							{
+								const auto fadeElapsedMs =
+									std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - fadeOutIt->second).count();
+
+								if (fadeElapsedMs >= group.getTimedModeFadeOutMs())
+								{
+									const bool previousActive = group.isActive();
+									group.setActive(false);
+									g_groupTimedVisibleSince.erase(group.getId());
+									g_groupTimedFadeOutStart.erase(group.getId());
+
+									if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != false)
+									{
+										g_vertexShaderManager.toggleHideMarkedShaders();
+										g_pixelShaderManager.toggleHideMarkedShaders();
+										g_computeShaderManager.toggleHideMarkedShaders();
+									}
+								}
+							}
 						}
 					}
+					else
+					{
+						g_groupTimedFadeOutStart.erase(group.getId());
+					}
 				}
+			}
+			else
+			{
+				g_groupTimedVisibleSince.erase(group.getId());
+				g_groupTimedFadeOutStart.erase(group.getId());
 			}
 
 			g_groupHotkeyWasDown[group.getId()] = isDownNow;
@@ -1222,6 +1287,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.45f, 1.0f));
 				ImGui::Text(" Auto-hide ");
 				ImGui::PopStyleColor();
+
+				if (g_groupTimedFadeOutStart.find(group.getId()) != g_groupTimedFadeOutStart.end())
+				{
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.65f, 0.30f, 1.0f));
+					ImGui::Text(" Fade-out ");
+					ImGui::PopStyleColor();
+				}
 			}
 			else if (group.isHoldMode())
 			{
@@ -1472,6 +1545,30 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						group.setTimedModeDelayMs(delayMs);
 					}
 					ImGui::PopItemWidth();
+
+					int minVisibleMs = group.getTimedModeMinVisibleMs();
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.4f);
+					ImGui::Text("Minimum visible");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					if (ImGui::SliderInt("##TimedModeMinVisibleMs", &minVisibleMs, 0, 5000, "%d ms"))
+					{
+						group.setTimedModeMinVisibleMs(minVisibleMs);
+					}
+					ImGui::SameLine();
+					showHelpMarker("Prevents the HUD from disappearing too quickly after being shown.");
+					ImGui::PopItemWidth();
+
+					int fadeOutMs = group.getTimedModeFadeOutMs();
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.4f);
+					ImGui::Text("Fade-out linger");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					if (ImGui::SliderInt("##TimedModeFadeOutMs", &fadeOutMs, 0, 5000, "%d ms"))
+					{
+						group.setTimedModeFadeOutMs(fadeOutMs);
+					}
+					ImGui::SameLine();
+					showHelpMarker("This is a soft fade-out state. The HUD remains visible a bit longer before the final hard hide.");
+					ImGui::PopItemWidth();
 				}
 
 				if (!isKeyEditing)
@@ -1516,6 +1613,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				g_groupHotkeyWasDown.erase(id);
 				g_groupHotkeyLastToggleTime.erase(id);
 				g_groupLastTimedTriggerTime.erase(id);
+				g_groupTimedVisibleSince.erase(id);
+				g_groupTimedFadeOutStart.erase(id);
 			}
 
 			saveShaderTogglerIniFile();

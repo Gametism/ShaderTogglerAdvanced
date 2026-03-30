@@ -65,6 +65,12 @@ namespace ShaderToggler
 		int getTimedModeDelayMs() const;
 		void setTimedModeDelayMs(int delayMs);
 
+		int getTimedModeMinVisibleMs() const;
+		void setTimedModeMinVisibleMs(int visibleMs);
+
+		int getTimedModeFadeOutMs() const;
+		void setTimedModeFadeOutMs(int fadeOutMs);
+
 		void setToggleKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		void setToggleKey(const KeyData& key);
 		const KeyData& getToggleKey() const;
@@ -103,7 +109,7 @@ namespace ShaderToggler
 
 		ToggleGroup makeDuplicate() const;
 
-		// 
+		// Harmless provenance accessors for diagnostics/ownership continuity.
 		static constexpr const char* getProvenanceOwnerTag() { return STA_TOGGLEGROUP_OWNER_TAG; }
 		static constexpr const char* getProvenanceAuthorTag() { return STA_TOGGLEGROUP_AUTHOR_TAG; }
 		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
@@ -119,6 +125,8 @@ namespace ShaderToggler
 		bool m_holdInverted;
 		bool m_timedMode;
 		int m_timedModeDelayMs;
+		int m_timedModeMinVisibleMs;
+		int m_timedModeFadeOutMs;
 		KeyData m_toggleKey;
 		std::vector<TimedTriggerBinding> m_timedTriggerKeys;
 

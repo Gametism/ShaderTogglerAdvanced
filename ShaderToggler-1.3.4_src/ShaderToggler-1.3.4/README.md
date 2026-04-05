@@ -7,17 +7,18 @@ Originally created by **Frans "Otis_Inf" Bouma**.
 Modified and expanded by **Sven "Gametism" Königsmann**.
 
 This version adds:
-- a modernized UI  
-- active-at-startup support for x86  
-- group duplication  
-- group reordering  
-- improved hotkey handling  
-- accelerated shader browsing while holding keys  
-- controller button support  
-- **hold-based activation modes**  
-- **auto-hide (timed) toggle groups**
-- **inverted auto-hide behavior**
-- **multiple timed trigger keys with configurable trigger modes**
+- a modernized UI
+- active-at-startup support for x86
+- group duplication
+- group reordering
+- improved hotkey handling
+- accelerated shader browsing while holding keys
+- controller button support
+- hold-based activation modes
+- auto-hide (timed) toggle groups
+- inverted auto-hide behavior
+- multiple timed trigger keys with configurable trigger modes
+- a **global hotkey modifier system** for all defined hotkeys
 
 ---
 
@@ -50,8 +51,8 @@ You should see the **Shader Toggler** panel and its controls there.
 
 To create a new shader toggle group:
 
-1. Open the ReShade overlay  
-2. Go to the **Shader Toggler** section  
+1. Open the ReShade overlay
+2. Go to the **Shader Toggler** section
 3. Click **New**
 
 A new group is created with:
@@ -67,10 +68,10 @@ Hotkeys do **not** need to be unique.
 Group names also do **not** need to be unique.
 
 A hotkey can be:
-- a keyboard key  
-- a mouse button  
-- a supported controller button  
-- optionally combined with `Alt`, `Ctrl`, or `Shift` for keyboard bindings  
+- a keyboard key
+- a mouse button
+- a supported controller button
+- optionally combined with `Alt`, `Ctrl`, or `Shift` for keyboard bindings
 
 Each group can also be set to:
 - **Active at startup**
@@ -78,9 +79,65 @@ Each group can also be set to:
 - **Auto-hide mode (timed)**
 
 You can also:
-- duplicate groups  
-- reorder groups with drag and drop  
-- save all groups to the config file  
+- duplicate groups
+- reorder groups with drag and drop
+- save all groups to the config file
+
+---
+
+## Global hotkey modifier
+
+ShaderToggler Advanced includes a **global hotkey modifier** setting that can be applied to all defined keyboard and mouse hotkeys at runtime.
+
+Available options:
+- `None`
+- `Ctrl`
+- `Alt`
+- `Shift`
+- `Ctrl + Alt`
+- `Ctrl + Shift`
+- `Alt + Shift`
+- `Ctrl + Alt + Shift`
+
+This is useful if:
+- you want safer default hotkeys
+- you want to reduce accidental triggers
+- you do not want to manually rebind every group after updates
+
+### How it works
+The selected modifier is applied **at runtime only**.
+
+That means:
+- your stored hotkeys stay exactly the same in the config
+- the modifier is simply required on top of the existing binding
+- no manual rebinding is needed
+
+### Example
+If a group hotkey is:
+- `Caps Lock`
+
+and the global modifier is set to:
+- `Ctrl`
+
+then the effective hotkey becomes:
+- `Ctrl + Caps Lock`
+
+If a hotkey is already:
+- `Alt + F1`
+
+and the global modifier is:
+- `Ctrl`
+
+then the effective hotkey becomes:
+- `Ctrl + Alt + F1`
+
+### Important note
+The global modifier applies to:
+- keyboard hotkeys
+- mouse hotkeys
+
+It does **not** change:
+- gamepad button bindings
 
 ---
 
@@ -89,15 +146,15 @@ You can also:
 ShaderToggler Advanced supports three main ways to control a group:
 
 ### 1. Toggle mode (default)
-- Press key → ON  
-- Press again → OFF  
+- Press key → ON
+- Press again → OFF
 
 This is the classic behavior.
 
 **Example:**  
 You want to manually hide a minimap:
-- press key once → minimap disappears  
-- press again → minimap returns  
+- press key once → minimap disappears
+- press again → minimap returns
 
 ---
 
@@ -108,17 +165,17 @@ Optional:
 - **Invert hold** → active by default, turns OFF while holding
 
 This is useful for:
-- ADS overlays  
-- temporary HUD visibility  
-- quick comparison setups  
+- ADS overlays
+- temporary HUD visibility
+- quick comparison setups
 
 **Example (normal hold):**
-- hold key → scoped overlay hidden  
-- release key → scoped overlay returns  
+- hold key → scoped overlay hidden
+- release key → scoped overlay returns
 
 **Example (invert hold):**
-- overlay is normally hidden  
-- hold key → overlay becomes visible only while held  
+- overlay is normally hidden
+- hold key → overlay becomes visible only while held
 
 ---
 
@@ -130,8 +187,8 @@ You can configure:
 - **Minimum visible time**
 - **Fade-out linger**
 - **Invert auto-hide behavior**
-- **multiple trigger keys**
-- **trigger mode per trigger key**
+- multiple trigger keys
+- trigger mode per trigger key
 
 ---
 
@@ -145,15 +202,11 @@ The timed state starts only when the key is pressed.
 **Example:**  
 Press attack once → HUD appears briefly → then hides again
 
----
-
 ### While held
 The timed state keeps refreshing while the key is held.
 
 **Example:**  
 Hold aim button → timer keeps refreshing as long as the button is held
-
----
 
 ### Press + hold
 The timed state starts on press and also keeps refreshing while the key remains held.
@@ -172,8 +225,8 @@ It only controls whether the selected game shaders are **allowed to render** or 
 
 So for a hunted HUD group:
 
-- **Group ACTIVE** = selected shaders are blocked = HUD hidden  
-- **Group INACTIVE** = selected shaders are allowed = HUD visible  
+- **Group ACTIVE** = selected shaders are blocked = HUD hidden
+- **Group INACTIVE** = selected shaders are allowed = HUD visible
 
 Because of that, timed mode may appear inverted at first depending on how your group is set up.
 
@@ -187,7 +240,7 @@ When triggered:
 - after the timer ends, it returns to **inactive**
 
 This is useful when:
-- **active = hidden** is **not** what you want for the resting state
+- `active = hidden` is **not** what you want for the resting state
 - or when the group should only block something briefly
 
 **Example:**
@@ -212,7 +265,7 @@ This is the most useful mode for modern auto-hide HUD behavior.
 ### Typical setup
 For a HUD hide group:
 - hunt the HUD shaders normally
-- confirm that **group active = HUD hidden**
+- confirm that `group active = HUD hidden`
 - enable:
   - **Active at startup**
   - **Auto-hide mode**
@@ -228,21 +281,21 @@ For a HUD hide group:
 ## Practical timed mode examples
 
 ### Example 1: Modern auto-hide HUD
-Goal:
+**Goal:**
 - HUD hidden by default
 - attack input reveals HUD briefly
 - HUD hides again after a delay
 
-Setup:
+**Setup:**
 - hunt HUD shaders
-- make sure **group active = HUD hidden**
+- make sure `group active = HUD hidden`
 - enable **Active at startup**
 - enable **Auto-hide mode**
 - enable **Invert auto-hide behavior**
 - add attack key as timed trigger
 - choose delay, for example `1500 ms`
 
-Result:
+**Result:**
 - HUD hidden normally
 - press attack → HUD appears
 - after 1.5 seconds → HUD disappears again
@@ -250,45 +303,45 @@ Result:
 ---
 
 ### Example 2: Mouse and controller support together
-Goal:
+**Goal:**
 - show the HUD whether the player uses mouse or controller
 
-Setup:
+**Setup:**
 - same as above
 - add multiple timed triggers:
   - `Left Mouse Button`
   - `Gamepad RT`
 
-Result:
+**Result:**
 - either trigger reveals the HUD
 - timer refreshes when either input is used
 
 ---
 
 ### Example 3: Keep HUD visible during continuous combat
-Goal:
+**Goal:**
 - HUD stays visible while continuously attacking
 
-Setup:
+**Setup:**
 - use **While held** or **Press + hold** for the trigger
 - set a short delay, for example `500 ms`
 
-Result:
+**Result:**
 - repeated or held input keeps the HUD visible
 - once input stops, HUD hides after the delay
 
 ---
 
 ### Example 4: Temporary tooltip / pickup prompt suppression
-Goal:
+**Goal:**
 - briefly hide a specific overlay when a key is pressed
 
-Setup:
+**Setup:**
 - group represents the overlay you want to suppress
-- use **normal timed mode**
+- use normal timed mode
 - do **not** invert it
 
-Result:
+**Result:**
 - press trigger → overlay disappears briefly
 - after the timer ends → overlay returns
 
@@ -304,8 +357,6 @@ This is the main timed duration.
 
 For HUD auto-show behavior, this is effectively **how long the HUD stays visible**.
 
----
-
 ### Minimum visible time
 Prevents the temporary timed state from ending too quickly.
 
@@ -315,8 +366,6 @@ This is useful when:
 
 **Example:**  
 You tap attack very quickly, but still want the HUD to remain visible for at least `300 ms`.
-
----
 
 ### Fade-out linger
 This is **not a real visual fade**.  
@@ -372,10 +421,10 @@ Not:
 ## Marking shaders
 
 To mark shaders successfully, make sure the element you want to hide is currently visible, for example:
-- HUD elements  
-- menus  
-- overlays  
-- visual effects  
+- HUD elements
+- menus
+- overlays
+- visual effects
 
 Then click **Hunt Shaders** on the group you want to configure.
 
@@ -392,24 +441,24 @@ This reduces the number of shaders you have to go through and makes hunting more
 ## Shader hunting hotkeys
 
 ### Pixel shaders
-- `Numpad 1` = previous pixel shader  
-- `Numpad 2` = next pixel shader  
-- `Numpad 3` = mark / unmark current pixel shader  
+- `Numpad 1` = previous pixel shader
+- `Numpad 2` = next pixel shader
+- `Numpad 3` = mark / unmark current pixel shader
 
 ### Vertex shaders
-- `Numpad 4` = previous vertex shader  
-- `Numpad 5` = next vertex shader  
-- `Numpad 6` = mark / unmark current vertex shader  
+- `Numpad 4` = previous vertex shader
+- `Numpad 5` = next vertex shader
+- `Numpad 6` = mark / unmark current vertex shader
 
 ### Compute shaders
-- `Numpad 7` = previous compute shader  
-- `Numpad 8` = next compute shader  
-- `Numpad 9` = mark / unmark current compute shader  
+- `Numpad 7` = previous compute shader
+- `Numpad 8` = next compute shader
+- `Numpad 9` = mark / unmark current compute shader
 
 ### Marked shader browsing
-- `Ctrl + Numpad 1 / 2` = previous / next marked pixel shader  
-- `Ctrl + Numpad 4 / 5` = previous / next marked vertex shader  
-- `Ctrl + Numpad 7 / 8` = previous / next marked compute shader  
+- `Ctrl + Numpad 1 / 2` = previous / next marked pixel shader
+- `Ctrl + Numpad 4 / 5` = previous / next marked vertex shader
+- `Ctrl + Numpad 7 / 8` = previous / next marked compute shader
 
 ### Accelerated holding
 Holding down browsing keys will automatically speed up scrolling over time.
@@ -419,7 +468,7 @@ Holding down browsing keys will automatically speed up scrolling over time.
 ## Testing a group
 
 To test a group while hunting:
-- press the hotkey assigned to that group  
+- press the hotkey assigned to that group
 
 If the selected shaders are correct, the targeted game elements should disappear when the group is active.
 
@@ -432,7 +481,6 @@ When you are finished hunting shaders for a group, click **Done**.
 ## Saving your groups
 
 To keep your groups for the next session, click:
-
 - **Save all Toggle Groups**
 
 This writes the configuration to:
@@ -445,18 +493,19 @@ The file is stored in the same folder as the add-on.
 
 ## Notes
 
-- ShaderToggler Advanced is for **game shader toggling**, not ReShade effect toggling  
-- The UI has been modernized while keeping the original workflow familiar  
-- Controller button mapping support is available  
-- Timed mode now supports inverted behavior for more intuitive HUD auto-show setups  
-- Multiple timed trigger keys let one group react to keyboard, mouse, and controller input at the same time  
+- ShaderToggler Advanced is for **game shader toggling**, not ReShade effect toggling
+- The UI has been modernized while keeping the original workflow familiar
+- Controller button mapping support is available
+- Timed mode now supports inverted behavior for more intuitive HUD auto-show setups
+- Multiple timed trigger keys let one group react to keyboard, mouse, and controller input at the same time
+- The global hotkey modifier lets users make all defined keyboard and mouse hotkeys safer without rebinding them individually
 
 ---
 
 ## Credits
 
 **Original ShaderToggler:**  
-Frans "Otis_Inf" Bouma  
+Frans "Otis_Inf" Bouma
 
 **ShaderToggler Advanced modifications:**  
-Sven "Gametism" Königsmann  
+Sven "Gametism" Königsmann

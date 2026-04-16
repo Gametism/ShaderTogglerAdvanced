@@ -18,7 +18,8 @@ This version adds:
 - auto-hide (timed) toggle groups
 - inverted auto-hide behavior
 - multiple timed trigger keys with configurable trigger modes
-- a **global hotkey modifier system** for all defined hotkeys
+- a global hotkey modifier system for all defined hotkeys
+- **improved shader detection behavior for modern wrapper layers**
 
 ---
 

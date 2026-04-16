@@ -75,7 +75,7 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
-// Per-group hotkey edge/debounce state
+// 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
@@ -83,21 +83,32 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTim
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
 static const int g_groupHotkeyDebounceMs = 150;
 
-// Hold-to-cycle state with acceleration
+// 
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static std::chrono::steady_clock::time_point s_holdStartNP1, s_holdStartNP2, s_holdStartNP4, s_holdStartNP5, s_holdStartNP7, s_holdStartNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
+
+//
+static bool s_prevNP1Down = false;
+static bool s_prevNP2Down = false;
+static bool s_prevNP3Down = false;
+static bool s_prevNP4Down = false;
+static bool s_prevNP5Down = false;
+static bool s_prevNP6Down = false;
+static bool s_prevNP7Down = false;
+static bool s_prevNP8Down = false;
+static bool s_prevNP9Down = false;
 
 static const int s_holdRepeatStartMs = 200;
 static const int s_holdRepeatMidMs = 120;
 static const int s_holdRepeatFastMs = 70;
 static const int s_holdRepeatVeryFastMs = 35;
 
-// Sign
+//
 static const char* GT_CREATOR = "Gametism";
 static const char* GT_CACHE_KEY = "CacheStamp";
 
-// Internal signature salt for CacheStamp (not written to the INI)
+//
 static const char* GT_SIG_A = "STA";
 static const char* GT_SIG_B = "Gametism";
 static const char* GT_SIG_C = "ShaderToggler";
@@ -122,11 +133,6 @@ static bool is_key_down_numpad_only(reshade::api::effect_runtime* runtime, int v
 	bool down = runtime->is_key_down(vk_numpad);
 	down = down || ((GetAsyncKeyState(vk_numpad) & 0x8000) != 0);
 	return down;
-}
-
-static bool is_key_pressed_numpad_only(reshade::api::effect_runtime* runtime, int vk_numpad)
-{
-	return runtime->is_key_pressed(vk_numpad);
 }
 
 static int getAcceleratedRepeatMs(const std::chrono::steady_clock::time_point& holdStart, const std::chrono::steady_clock::time_point& now)
@@ -222,7 +228,7 @@ static std::string buildIniSignature()
 {
 	std::string data;
 
-	// Visible config fields
+	//
 	data += "Creator=";
 	data += GT_CREATOR;
 	data += "|AmountGroups=";
@@ -232,7 +238,7 @@ static std::string buildIniSignature()
 	data += "|GlobalHotkeyModifier=";
 	data += std::to_string(KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()));
 
-	// Hidden internal salt/signature ingredients (not stored in INI)
+	//
 	data += "|SigA=";
 	data += GT_SIG_A;
 	data += "|SigB=";
@@ -872,7 +878,7 @@ static void onReshadePresent(effect_runtime* runtime)
 	const int NP9 = VK_NUMPAD9;
 
 	bool np1Down = is_key_down_numpad_only(runtime, NP1);
-	bool np1Pressed = is_key_pressed_numpad_only(runtime, NP1);
+	bool np1Pressed = np1Down && !s_prevNP1Down;
 	if (np1Pressed)
 	{
 		g_pixelShaderManager.huntPreviousShader(ctrlDown);
@@ -890,9 +896,10 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		s_np1Held = false;
 	}
+	s_prevNP1Down = np1Down;
 
 	bool np2Down = is_key_down_numpad_only(runtime, NP2);
-	bool np2Pressed = is_key_pressed_numpad_only(runtime, NP2);
+	bool np2Pressed = np2Down && !s_prevNP2Down;
 	if (np2Pressed)
 	{
 		g_pixelShaderManager.huntNextShader(ctrlDown);
@@ -910,14 +917,18 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		s_np2Held = false;
 	}
+	s_prevNP2Down = np2Down;
 
-	if (is_key_pressed_numpad_only(runtime, NP3))
+	bool np3Down = is_key_down_numpad_only(runtime, NP3);
+	bool np3Pressed = np3Down && !s_prevNP3Down;
+	if (np3Pressed)
 	{
 		g_pixelShaderManager.toggleMarkOnHuntedShader();
 	}
+	s_prevNP3Down = np3Down;
 
 	bool np4Down = is_key_down_numpad_only(runtime, NP4);
-	bool np4Pressed = is_key_pressed_numpad_only(runtime, NP4);
+	bool np4Pressed = np4Down && !s_prevNP4Down;
 	if (np4Pressed)
 	{
 		g_vertexShaderManager.huntPreviousShader(ctrlDown);
@@ -935,9 +946,10 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		s_np4Held = false;
 	}
+	s_prevNP4Down = np4Down;
 
 	bool np5Down = is_key_down_numpad_only(runtime, NP5);
-	bool np5Pressed = is_key_pressed_numpad_only(runtime, NP5);
+	bool np5Pressed = np5Down && !s_prevNP5Down;
 	if (np5Pressed)
 	{
 		g_vertexShaderManager.huntNextShader(ctrlDown);
@@ -955,14 +967,18 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		s_np5Held = false;
 	}
+	s_prevNP5Down = np5Down;
 
-	if (is_key_pressed_numpad_only(runtime, NP6))
+	bool np6Down = is_key_down_numpad_only(runtime, NP6);
+	bool np6Pressed = np6Down && !s_prevNP6Down;
+	if (np6Pressed)
 	{
 		g_vertexShaderManager.toggleMarkOnHuntedShader();
 	}
+	s_prevNP6Down = np6Down;
 
 	bool np7Down = is_key_down_numpad_only(runtime, NP7);
-	bool np7Pressed = is_key_pressed_numpad_only(runtime, NP7);
+	bool np7Pressed = np7Down && !s_prevNP7Down;
 	if (np7Pressed)
 	{
 		g_computeShaderManager.huntPreviousShader(ctrlDown);
@@ -980,9 +996,10 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		s_np7Held = false;
 	}
+	s_prevNP7Down = np7Down;
 
 	bool np8Down = is_key_down_numpad_only(runtime, NP8);
-	bool np8Pressed = is_key_pressed_numpad_only(runtime, NP8);
+	bool np8Pressed = np8Down && !s_prevNP8Down;
 	if (np8Pressed)
 	{
 		g_computeShaderManager.huntNextShader(ctrlDown);
@@ -1000,11 +1017,15 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		s_np8Held = false;
 	}
+	s_prevNP8Down = np8Down;
 
-	if (is_key_pressed_numpad_only(runtime, NP9))
+	bool np9Down = is_key_down_numpad_only(runtime, NP9);
+	bool np9Pressed = np9Down && !s_prevNP9Down;
+	if (np9Pressed)
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
+	s_prevNP9Down = np9Down;
 }
 
 void endKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)

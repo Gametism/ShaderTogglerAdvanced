@@ -19,7 +19,7 @@ This version adds:
 - inverted auto-hide behavior
 - multiple timed trigger keys with configurable trigger modes
 - a global hotkey modifier system for all defined hotkeys
-- **improved shader detection behavior for modern wrapper layers**
+- **improved shader detection behavior for RenoDX**
 
 ---
 

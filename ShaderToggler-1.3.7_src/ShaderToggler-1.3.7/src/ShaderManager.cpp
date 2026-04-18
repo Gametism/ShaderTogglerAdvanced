@@ -55,6 +55,50 @@ namespace ShaderToggler
 		}
 	}
 
+	void ShaderManager::rebuildHuntSnapshotLocked()
+	{
+		_huntShaderHashesSnapshot = _collectedActiveShaderHashesOrdered;
+
+		if (_huntShaderHashesSnapshot.empty())
+		{
+			_activeHuntedShaderIndex = -1;
+			_activeHuntedShaderHash = 0;
+			return;
+		}
+
+		if (_activeHuntedShaderHash == 0)
+		{
+			_activeHuntedShaderIndex = -1;
+			return;
+		}
+
+		for (size_t i = 0; i < _huntShaderHashesSnapshot.size(); ++i)
+		{
+			if (_huntShaderHashesSnapshot[i] == _activeHuntedShaderHash)
+			{
+				_activeHuntedShaderIndex = static_cast<int>(i);
+				return;
+			}
+		}
+
+		_activeHuntedShaderIndex = -1;
+		_activeHuntedShaderHash = 0;
+	}
+
+	void ShaderManager::syncActiveHuntedShaderToSnapshotLocked()
+	{
+		if (_activeHuntedShaderIndex < 0 ||
+			_huntShaderHashesSnapshot.empty() ||
+			_activeHuntedShaderIndex >= static_cast<int>(_huntShaderHashesSnapshot.size()))
+		{
+			_activeHuntedShaderIndex = -1;
+			_activeHuntedShaderHash = 0;
+			return;
+		}
+
+		_activeHuntedShaderHash = _huntShaderHashesSnapshot[static_cast<size_t>(_activeHuntedShaderIndex)];
+	}
+
 	void ShaderManager::removeHandle(uint64_t handle)
 	{
 		uint32_t shaderHash = 0;
@@ -97,18 +141,7 @@ namespace ShaderToggler
 			{
 				if (*it == shaderHash)
 				{
-					const int removedIndex = static_cast<int>(std::distance(_collectedActiveShaderHashesOrdered.begin(), it));
 					it = _collectedActiveShaderHashesOrdered.erase(it);
-
-					if (_activeHuntedShaderIndex > removedIndex)
-					{
-						--_activeHuntedShaderIndex;
-					}
-					else if (_activeHuntedShaderIndex == removedIndex)
-					{
-						_activeHuntedShaderIndex = -1;
-						_activeHuntedShaderHash = 0;
-					}
 				}
 				else
 				{
@@ -116,20 +149,13 @@ namespace ShaderToggler
 				}
 			}
 
-			if (_collectedActiveShaderHashesOrdered.empty())
+			if (_activeHuntedShaderHash == shaderHash)
 			{
-				_activeHuntedShaderIndex = -1;
 				_activeHuntedShaderHash = 0;
+				_activeHuntedShaderIndex = -1;
 			}
-			else if (_activeHuntedShaderIndex >= static_cast<int>(_collectedActiveShaderHashesOrdered.size()))
-			{
-				_activeHuntedShaderIndex = static_cast<int>(_collectedActiveShaderHashesOrdered.size()) - 1;
-				_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
-			}
-			else if (_activeHuntedShaderIndex >= 0)
-			{
-				_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
-			}
+
+			rebuildHuntSnapshotLocked();
 		}
 	}
 
@@ -152,6 +178,7 @@ namespace ShaderToggler
 			std::unique_lock lock(_collectedActiveHandlesMutex);
 			_collectedActiveShaderHashes.clear();
 			_collectedActiveShaderHashesOrdered.clear();
+			_huntShaderHashesSnapshot.clear();
 		}
 	}
 
@@ -165,6 +192,11 @@ namespace ShaderToggler
 			std::unique_lock lock(_markedShaderHashMutex);
 			_markedShaderHashes.clear();
 		}
+
+		{
+			std::unique_lock lock(_collectedActiveHandlesMutex);
+			_huntShaderHashesSnapshot.clear();
+		}
 	}
 
 	void ShaderManager::setActiveHuntedShaderHandle()
@@ -172,14 +204,14 @@ namespace ShaderToggler
 		std::shared_lock lock(_collectedActiveHandlesMutex);
 
 		if (_activeHuntedShaderIndex < 0 ||
-			_collectedActiveShaderHashesOrdered.empty() ||
-			_activeHuntedShaderIndex >= static_cast<int>(_collectedActiveShaderHashesOrdered.size()))
+			_huntShaderHashesSnapshot.empty() ||
+			_activeHuntedShaderIndex >= static_cast<int>(_huntShaderHashesSnapshot.size()))
 		{
 			_activeHuntedShaderHash = 0;
 			return;
 		}
 
-		_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
+		_activeHuntedShaderHash = _huntShaderHashesSnapshot[static_cast<size_t>(_activeHuntedShaderIndex)];
 	}
 
 	void ShaderManager::huntNextShader(bool ctrlPressed)
@@ -189,13 +221,19 @@ namespace ShaderToggler
 			return;
 		}
 
-		std::shared_lock collectedLock(_collectedActiveHandlesMutex);
-		if (_collectedActiveShaderHashesOrdered.empty())
+		std::unique_lock collectedLock(_collectedActiveHandlesMutex);
+
+		if (_huntShaderHashesSnapshot.empty())
+		{
+			rebuildHuntSnapshotLocked();
+		}
+
+		if (_huntShaderHashesSnapshot.empty())
 		{
 			return;
 		}
 
-		const int collectedCount = static_cast<int>(_collectedActiveShaderHashesOrdered.size());
+		const int collectedCount = static_cast<int>(_huntShaderHashesSnapshot.size());
 
 		if (ctrlPressed)
 		{
@@ -217,7 +255,7 @@ namespace ShaderToggler
 			for (int step = 0; step < collectedCount; ++step)
 			{
 				index = (index + 1) % collectedCount;
-				const uint32_t hash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(index)];
+				const uint32_t hash = _huntShaderHashesSnapshot[static_cast<size_t>(index)];
 				if (_markedShaderHashes.count(hash) == 1)
 				{
 					_activeHuntedShaderIndex = index;
@@ -238,7 +276,7 @@ namespace ShaderToggler
 			_activeHuntedShaderIndex = 0;
 		}
 
-		_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
+		syncActiveHuntedShaderToSnapshotLocked();
 	}
 
 	void ShaderManager::huntPreviousShader(bool ctrlPressed)
@@ -248,13 +286,19 @@ namespace ShaderToggler
 			return;
 		}
 
-		std::shared_lock collectedLock(_collectedActiveHandlesMutex);
-		if (_collectedActiveShaderHashesOrdered.empty())
+		std::unique_lock collectedLock(_collectedActiveHandlesMutex);
+
+		if (_huntShaderHashesSnapshot.empty())
+		{
+			rebuildHuntSnapshotLocked();
+		}
+
+		if (_huntShaderHashesSnapshot.empty())
 		{
 			return;
 		}
 
-		const int collectedCount = static_cast<int>(_collectedActiveShaderHashesOrdered.size());
+		const int collectedCount = static_cast<int>(_huntShaderHashesSnapshot.size());
 
 		if (ctrlPressed)
 		{
@@ -276,7 +320,7 @@ namespace ShaderToggler
 			for (int step = 0; step < collectedCount; ++step)
 			{
 				index = (index - 1 + collectedCount) % collectedCount;
-				const uint32_t hash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(index)];
+				const uint32_t hash = _huntShaderHashesSnapshot[static_cast<size_t>(index)];
 				if (_markedShaderHashes.count(hash) == 1)
 				{
 					_activeHuntedShaderIndex = index;
@@ -297,7 +341,7 @@ namespace ShaderToggler
 			--_activeHuntedShaderIndex;
 		}
 
-		_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
+		syncActiveHuntedShaderToSnapshotLocked();
 	}
 
 	bool ShaderManager::isBlockedShader(uint32_t shaderHash)

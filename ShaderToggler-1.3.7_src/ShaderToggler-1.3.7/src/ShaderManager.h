@@ -49,9 +49,6 @@
 
 namespace ShaderToggler
 {
-	/// <summary>
-	/// Class which manages a set of shaders for a given type (pixel, vertex...)
-	/// </summary>
 	class ShaderManager
 	{
 	public:
@@ -60,42 +57,15 @@ namespace ShaderToggler
 		void addHashHandlePair(uint32_t shaderHash, uint64_t pipelineHandle);
 		void removeHandle(uint64_t handle);
 
-		/// <summary>
-		/// Switches on the hunting mode for the shader manager. It will copy the passed in hashes to the set of marked hashes. Hunting mode is the mode
-		///	where the user can step through collected active shaders to mark them for assignment to the current edited group.
-		/// </summary>
-		/// <param name="currentMarkedHashes"></param>
 		void startHuntingMode(const std::unordered_set<uint32_t> currentMarkedHashes);
 		void stopHuntingMode();
 
-		/// <summary>
-		/// Moves to the next shader. If control is pressed as well, it'll step to the next marked shader (if any). If there aren't any shaders in that
-		///	situation, it'll stay on the current shader.
-		/// </summary>
-		/// <param name="ctrlPressed">If control is pressed as well, it'll step to the next marked shader (if any). If there aren't any shaders in that
-		///	situation, it'll stay on the current shader.</param>
 		void huntNextShader(bool ctrlPressed);
 
-		/// <summary>
-		/// Moves to the previous shader. If control is pressed as well, it'll step to the previous marked shader (if any). If there aren't any shaders in that
-		///	situation, it'll stay on the current shader.
-		/// </summary>
-		/// <param name="ctrlPressed">If control is pressed as well, it'll step to the previous marked shader (if any). If there aren't any shaders in that
-		///	situation, it'll stay on the current shader.</param>
 		void huntPreviousShader(bool ctrlPressed);
 
-		/// <summary>
-		/// Returns true if the shader hash passed in is the currently hunted shader or it's part of the marked shader hashes
-		/// </summary>
-		/// <param name="shaderHash"></param>
-		/// <returns></returns>
 		bool isBlockedShader(uint32_t shaderHash);
 
-		/// <summary>
-		/// Returns the shader hash for the passed in pipeline handle, if found. 0 otherwise.
-		/// </summary>
-		/// <param name="handle"></param>
-		/// <returns></returns>
 		uint32_t getShaderHash(uint64_t handle);
 
 		void addActivePipelineHandle(uint64_t handle);
@@ -150,14 +120,17 @@ namespace ShaderToggler
 		
 	private:
 		void setActiveHuntedShaderHandle();
+		void rebuildHuntSnapshotLocked();
+		void syncActiveHuntedShaderToSnapshotLocked();
 
-		std::unordered_set<uint32_t> _shaderHashes;					// all shader hashes added through init pipeline
-		std::map<uint64_t, uint32_t> _handleToShaderHash;			// pipeline handle per shader hash. Handle is removed when a pipeline is destroyed.
+		std::unordered_set<uint32_t> _shaderHashes;					
+		std::map<uint64_t, uint32_t> _handleToShaderHash;			
 
-		std::unordered_set<uint32_t> _collectedActiveShaderHashes;	// uniqueness tracking for collected active shaders
-		std::vector<uint32_t> _collectedActiveShaderHashesOrdered;	// stable traversal order for hunting
+		std::unordered_set<uint32_t> _collectedActiveShaderHashes;	
+		std::vector<uint32_t> _collectedActiveShaderHashesOrdered;	
+		std::vector<uint32_t> _huntShaderHashesSnapshot;			
 
-		std::unordered_set<uint32_t> _markedShaderHashes;			// the hashes for shaders which are currently marked.
+		std::unordered_set<uint32_t> _markedShaderHashes;			
 
 		bool _isInHuntingMode = false;
 		int _activeHuntedShaderIndex = -1;

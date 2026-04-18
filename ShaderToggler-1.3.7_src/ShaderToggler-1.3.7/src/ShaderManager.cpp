@@ -97,7 +97,18 @@ namespace ShaderToggler
 			{
 				if (*it == shaderHash)
 				{
+					const int removedIndex = static_cast<int>(std::distance(_collectedActiveShaderHashesOrdered.begin(), it));
 					it = _collectedActiveShaderHashesOrdered.erase(it);
+
+					if (_activeHuntedShaderIndex > removedIndex)
+					{
+						--_activeHuntedShaderIndex;
+					}
+					else if (_activeHuntedShaderIndex == removedIndex)
+					{
+						_activeHuntedShaderIndex = -1;
+						_activeHuntedShaderHash = 0;
+					}
 				}
 				else
 				{
@@ -110,18 +121,13 @@ namespace ShaderToggler
 				_activeHuntedShaderIndex = -1;
 				_activeHuntedShaderHash = 0;
 			}
-			else
+			else if (_activeHuntedShaderIndex >= static_cast<int>(_collectedActiveShaderHashesOrdered.size()))
 			{
-				if (_activeHuntedShaderIndex >= static_cast<int>(_collectedActiveShaderHashesOrdered.size()))
-				{
-					_activeHuntedShaderIndex = static_cast<int>(_collectedActiveShaderHashesOrdered.size()) - 1;
-				}
-
-				if (_activeHuntedShaderIndex < 0)
-				{
-					_activeHuntedShaderIndex = 0;
-				}
-
+				_activeHuntedShaderIndex = static_cast<int>(_collectedActiveShaderHashesOrdered.size()) - 1;
+				_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
+			}
+			else if (_activeHuntedShaderIndex >= 0)
+			{
 				_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[static_cast<size_t>(_activeHuntedShaderIndex)];
 			}
 		}
@@ -322,12 +328,6 @@ namespace ShaderToggler
 			if (_collectedActiveShaderHashes.emplace(shaderHash).second)
 			{
 				_collectedActiveShaderHashesOrdered.push_back(shaderHash);
-
-				if (_activeHuntedShaderIndex < 0)
-				{
-					_activeHuntedShaderIndex = 0;
-					_activeHuntedShaderHash = _collectedActiveShaderHashesOrdered[0];
-				}
 			}
 		}
 	}

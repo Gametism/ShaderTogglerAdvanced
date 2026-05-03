@@ -35,6 +35,11 @@
 #include <cstring>
 #include <cstdio>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <cstdint>
+#include <climits>
+#include <cctype>
 
 #ifdef min
 #undef min
@@ -167,6 +172,55 @@ static std::string toHex64(uint64_t value)
 	return std::string(buf);
 }
 
+static std::string toLowerCopy(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(),
+		[](unsigned char c)
+		{
+			return static_cast<char>(std::tolower(c));
+		});
+
+	return text;
+}
+
+static void sortToggleGroupsByHotkey()
+{
+	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
+		[](const ToggleGroup& a, const ToggleGroup& b)
+		{
+			const int keyA = a.getToggleKey().toInt();
+			const int keyB = b.getToggleKey().toInt();
+
+			if (keyA != keyB)
+			{
+				return keyA < keyB;
+			}
+
+			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
+		});
+
+	saveShaderTogglerIniFile();
+}
+
+static void sortToggleGroupsByNameAZ()
+{
+	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
+		[](const ToggleGroup& a, const ToggleGroup& b)
+		{
+			const std::string nameA = toLowerCopy(a.getName());
+			const std::string nameB = toLowerCopy(b.getName());
+
+			if (nameA != nameB)
+			{
+				return nameA < nameB;
+			}
+
+			return a.getId() < b.getId();
+		});
+
+	saveShaderTogglerIniFile();
+}
+
 static void sortToggleGroupsByNameLength()
 {
 	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
@@ -180,7 +234,7 @@ static void sortToggleGroupsByNameLength()
 				return lengthA < lengthB;
 			}
 
-			return a.getName() < b.getName();
+			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
 		});
 
 	saveShaderTogglerIniFile();
@@ -1273,6 +1327,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::Separator();
 
 		std::vector<int> idsToRemove;
+		int idToDuplicate = -1;
 
 		for (auto& group : g_toggleGroups)
 		{
@@ -1296,8 +1351,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			if (ImGui::Button("Duplicate"))
 			{
-				g_toggleGroups.push_back(group.makeDuplicate());
-				saveShaderTogglerIniFile();
+				idToDuplicate = group.getId();
 			}
 
 			ImGui::SameLine();
@@ -1648,6 +1702,28 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::PopID();
 		}
 
+		if (idToDuplicate >= 0)
+		{
+			ToggleGroup duplicate("", ToggleGroup::getNewGroupId());
+			bool hasDuplicate = false;
+
+			for (const auto& group : g_toggleGroups)
+			{
+				if (group.getId() == idToDuplicate)
+				{
+					duplicate = group.makeDuplicate();
+					hasDuplicate = true;
+					break;
+				}
+			}
+
+			if (hasDuplicate)
+			{
+				g_toggleGroups.push_back(duplicate);
+				saveShaderTogglerIniFile();
+			}
+		}
+
 		if (!idsToRemove.empty())
 		{
 			g_toggleGroupIdKeyBindingEditing = -1;
@@ -1695,6 +1771,22 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::SameLine();
 		showHelpMarker("Manual ordering is preserved unless a sort button is used.");
 
+		if (ImGui::Button("Sort by hotkey"))
+		{
+			sortToggleGroupsByHotkey();
+		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups by their stored hotkey value. Groups with the same hotkey are sorted by name.");
+
+		ImGui::SameLine();
+		if (ImGui::Button("Sort A-Z"))
+		{
+			sortToggleGroupsByNameAZ();
+		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups alphabetically by name, ignoring letter case.");
+
+		ImGui::SameLine();
 		if (ImGui::Button("Sort by name length"))
 		{
 			sortToggleGroupsByNameLength();

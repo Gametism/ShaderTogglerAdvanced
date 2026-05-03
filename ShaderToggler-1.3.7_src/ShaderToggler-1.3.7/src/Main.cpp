@@ -167,6 +167,25 @@ static std::string toHex64(uint64_t value)
 	return std::string(buf);
 }
 
+static void sortToggleGroupsByNameLength()
+{
+	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
+		[](const ToggleGroup& a, const ToggleGroup& b)
+		{
+			const size_t lengthA = a.getName().length();
+			const size_t lengthB = b.getName().length();
+
+			if (lengthA != lengthB)
+			{
+				return lengthA < lengthB;
+			}
+
+			return a.getName() < b.getName();
+		});
+
+	saveShaderTogglerIniFile();
+}
+
 static void appendSortedHashesToSignature(std::string& data, const char* prefix, const std::unordered_set<uint32_t>& hashes)
 {
 	std::vector<uint32_t> sorted(hashes.begin(), hashes.end());
@@ -1673,6 +1692,16 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("Group Order", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
+		ImGui::SameLine();
+		showHelpMarker("Manual ordering is preserved unless a sort button is used.");
+
+		if (ImGui::Button("Sort by name length"))
+		{
+			sortToggleGroupsByNameLength();
+		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups from shortest name to longest name. Groups with the same name length are sorted alphabetically.");
+
 		ImGui::Separator();
 
 		float computedHeight = 45.0f * static_cast<float>(g_toggleGroups.size()) + 20.0f;

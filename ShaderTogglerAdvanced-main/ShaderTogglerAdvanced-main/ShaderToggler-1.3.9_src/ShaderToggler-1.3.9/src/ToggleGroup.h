@@ -17,16 +17,6 @@ namespace ShaderToggler
 
 	class ToggleGroup
 	{
-public:
-
-		enum class ReactiveTriggerMode
-		{
-			Disabled = 0,
-			ActivateWhilePresent = 1,
-			DeactivateWhilePresent = 2
-		};
-
-
 	public:
 		using GroupId = int;
 
@@ -41,6 +31,13 @@ public:
 		{
 			KeyData key;
 			TimedTriggerMode mode = TimedTriggerMode::OnPress;
+		};
+
+		enum class ReactiveTriggerMode
+		{
+			Disabled = 0,
+			ActivateWhilePresent = 1,
+			DeactivateWhilePresent = 2
 		};
 
 		ToggleGroup(const std::string& name, GroupId id);
@@ -107,6 +104,26 @@ public:
 		static int timedTriggerModeToInt(TimedTriggerMode mode);
 		static TimedTriggerMode timedTriggerModeFromInt(int value);
 
+		bool isReactiveTriggerEnabled() const;
+		void setReactiveTriggerEnabled(bool enabled);
+
+		ReactiveTriggerMode getReactiveTriggerMode() const;
+		void setReactiveTriggerMode(ReactiveTriggerMode mode);
+
+		static const char* reactiveTriggerModeToString(ReactiveTriggerMode mode);
+		static int reactiveTriggerModeToInt(ReactiveTriggerMode mode);
+		static ReactiveTriggerMode reactiveTriggerModeFromInt(int value);
+
+		void clearReactiveWatcherHashes();
+		void storeReactiveWatcherHashes(
+			const std::unordered_set<uint32_t>& pixel,
+			const std::unordered_set<uint32_t>& vertex,
+			const std::unordered_set<uint32_t>& compute);
+
+		const std::unordered_set<uint32_t>& getReactivePixelShaderHashes() const;
+		const std::unordered_set<uint32_t>& getReactiveVertexShaderHashes() const;
+		const std::unordered_set<uint32_t>& getReactiveComputeShaderHashes() const;
+
 		void clearHashes();
 		void storeCollectedHashes(
 			const std::unordered_set<uint32_t>& pixel,
@@ -128,24 +145,7 @@ public:
 		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
 		static constexpr int getProvenanceRevision() { return STA_TOGGLEGROUP_PROVENANCE_REV; }
 
-	
-		bool isReactiveTriggerEnabled() const;
-		void setReactiveTriggerEnabled(bool enabled);
-
-		ReactiveTriggerMode getReactiveTriggerMode() const;
-		void setReactiveTriggerMode(ReactiveTriggerMode mode);
-
-		const std::unordered_set<uint32_t>& getReactivePixelShaderHashes() const;
-		const std::unordered_set<uint32_t>& getReactiveVertexShaderHashes() const;
-		const std::unordered_set<uint32_t>& getReactiveComputeShaderHashes() const;
-
-		void storeReactiveWatcherHashes(
-			const std::unordered_set<uint32_t>& pixelHashes,
-			const std::unordered_set<uint32_t>& vertexHashes,
-			const std::unordered_set<uint32_t>& computeHashes);
-
-
-private:
+	private:
 		GroupId m_id;
 		std::string m_name;
 		bool m_active;
@@ -164,14 +164,11 @@ private:
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
-	
-		bool m_reactiveTriggerEnabled = false;
-		ReactiveTriggerMode m_reactiveTriggerMode = ReactiveTriggerMode::Disabled;
 
+		bool m_reactiveTriggerEnabled;
+		ReactiveTriggerMode m_reactiveTriggerMode;
 		std::unordered_set<uint32_t> m_reactivePixelShaderHashes;
 		std::unordered_set<uint32_t> m_reactiveVertexShaderHashes;
 		std::unordered_set<uint32_t> m_reactiveComputeShaderHashes;
-
-
-};
+	};
 }

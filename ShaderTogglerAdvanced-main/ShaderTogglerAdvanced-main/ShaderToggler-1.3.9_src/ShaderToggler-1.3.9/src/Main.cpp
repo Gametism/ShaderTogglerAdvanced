@@ -35,11 +35,6 @@
 #include <cstring>
 #include <cstdio>
 #include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <cstdint>
-#include <climits>
-#include <cctype>
 
 #ifdef min
 #undef min
@@ -133,7 +128,6 @@ static const char* GT_FOOTER =
 
 static bool g_uiStyleInitialized = false;
 
-
 static std::unordered_set<uint32_t> g_frameActivePixelHashes;
 static std::unordered_set<uint32_t> g_frameActiveVertexHashes;
 static std::unordered_set<uint32_t> g_frameActiveComputeHashes;
@@ -145,7 +139,6 @@ static std::unordered_map<int, bool> g_reactiveHasPreviousState;
 
 static const int g_reactiveEnterFrames = 3;
 static const int g_reactiveExitFrames = 12;
-
 
 
 static bool is_key_down_numpad_only(reshade::api::effect_runtime* runtime, int vk_numpad)
@@ -185,118 +178,6 @@ static std::string toHex64(uint64_t value)
 	char buf[17] = {};
 	snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(value));
 	return std::string(buf);
-}
-
-static std::string toLowerCopy(std::string text)
-{
-	std::transform(text.begin(), text.end(), text.begin(),
-		[](unsigned char c)
-		{
-			return static_cast<char>(std::tolower(c));
-		});
-
-	return text;
-}
-
-static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
-{
-	const uint8_t keyCode = group.getToggleKey().getKeyCode();
-
-	switch (keyCode)
-	{
-	case VK_END:      return 0;
-
-	case VK_DIVIDE:   return 10;
-	case VK_MULTIPLY: return 11;
-	case VK_SUBTRACT: return 12;
-	case VK_ADD:      return 13;
-
-	case VK_BACK:     return 20;
-	case VK_PRIOR:    return 21;
-	case VK_NEXT:     return 22;
-
-	case VK_UP:       return 30;
-	case VK_RIGHT:    return 31;
-	case VK_DOWN:     return 32;
-	case VK_LEFT:     return 33;
-
-	case VK_NUMPAD7:  return 40;
-	case VK_NUMPAD8:  return 41;
-	case VK_NUMPAD9:  return 42;
-	case VK_NUMPAD0:  return 43;
-	case VK_DECIMAL:  return 44;
-
-	case VK_INSERT:   return 50;
-	case VK_DELETE:   return 51;
-
-	default:
-		return 1000 + static_cast<int>(keyCode);
-	}
-}
-
-static void sortToggleGroupsByHotkey()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const int priorityA = getHotkeyLayoutSortPriority(a);
-			const int priorityB = getHotkeyLayoutSortPriority(b);
-
-			if (priorityA != priorityB)
-			{
-				return priorityA < priorityB;
-			}
-
-			const int keyA = a.getToggleKey().toInt();
-			const int keyB = b.getToggleKey().toInt();
-
-			if (keyA != keyB)
-			{
-				return keyA < keyB;
-			}
-
-			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
-		});
-
-	saveShaderTogglerIniFile();
-}
-
-static void sortToggleGroupsByNameAZ()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const std::string nameA = toLowerCopy(a.getName());
-			const std::string nameB = toLowerCopy(b.getName());
-
-			if (nameA != nameB)
-			{
-				return nameA < nameB;
-			}
-
-			return a.getId() < b.getId();
-		});
-
-	saveShaderTogglerIniFile();
-}
-
-static void sortToggleGroupsByNameLength()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const size_t lengthA = a.getName().length();
-			const size_t lengthB = b.getName().length();
-
-			if (lengthA != lengthB)
-			{
-				return lengthA < lengthB;
-			}
-
-			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
-		});
-
-	saveShaderTogglerIniFile();
 }
 
 static void appendSortedHashesToSignature(std::string& data, const char* prefix, const std::unordered_set<uint32_t>& hashes)
@@ -754,6 +635,75 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 	}
 }
 
+
+static bool containsAnyReactiveHash(
+	const std::unordered_set<uint32_t>& frameHashes,
+	const std::unordered_set<uint32_t>& watcherHashes)
+{
+	for (uint32_t hash : watcherHashes)
+	{
+		if (frameHashes.find(hash) != frameHashes.end())
+			return true;
+	}
+
+	return false;
+}
+
+static bool isReactiveWatcherPresent(const ToggleGroup& group)
+{
+	return
+		containsAnyReactiveHash(g_frameActivePixelHashes, group.getReactivePixelShaderHashes()) ||
+		containsAnyReactiveHash(g_frameActiveVertexHashes, group.getReactiveVertexShaderHashes()) ||
+		containsAnyReactiveHash(g_frameActiveComputeHashes, group.getReactiveComputeShaderHashes());
+}
+
+static void updateReactiveGroup(ToggleGroup& group)
+{
+	if (!group.isReactiveTriggerEnabled() || group.getReactiveTriggerMode() == ToggleGroup::ReactiveTriggerMode::Disabled)
+		return;
+
+	const bool watcherPresent = isReactiveWatcherPresent(group);
+	const int groupId = group.getId();
+
+	if (watcherPresent)
+	{
+		g_reactivePresentFrames[groupId]++;
+		g_reactiveAbsentFrames[groupId] = 0;
+	}
+	else
+	{
+		g_reactiveAbsentFrames[groupId]++;
+		g_reactivePresentFrames[groupId] = 0;
+	}
+
+	if (g_reactivePresentFrames[groupId] >= g_reactiveEnterFrames)
+	{
+		if (!g_reactiveHasPreviousState[groupId])
+		{
+			g_reactivePreviousState[groupId] = group.isActive();
+			g_reactiveHasPreviousState[groupId] = true;
+		}
+
+		if (group.getReactiveTriggerMode() == ToggleGroup::ReactiveTriggerMode::ActivateWhilePresent)
+		{
+			setGroupActiveWithEditRefresh(group, true);
+		}
+		else if (group.getReactiveTriggerMode() == ToggleGroup::ReactiveTriggerMode::DeactivateWhilePresent)
+		{
+			setGroupActiveWithEditRefresh(group, false);
+		}
+	}
+
+	if (g_reactiveAbsentFrames[groupId] >= g_reactiveExitFrames)
+	{
+		if (g_reactiveHasPreviousState[groupId])
+		{
+			setGroupActiveWithEditRefresh(group, g_reactivePreviousState[groupId]);
+			g_reactiveHasPreviousState[groupId] = false;
+		}
+	}
+}
+
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
 	if (nullptr != commandList && pipelineHandle.handle != 0)
@@ -766,6 +716,13 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 		{
 			return;
 		}
+		if (handleHasPixelShaderAttached)
+			g_frameActivePixelHashes.insert(g_pixelShaderManager.getShaderHash(pipelineHandle.handle));
+		if (handleHasVertexShaderAttached)
+			g_frameActiveVertexHashes.insert(g_vertexShaderManager.getShaderHash(pipelineHandle.handle));
+		if (handleHasComputeShaderAttached)
+			g_frameActiveComputeHashes.insert(g_computeShaderManager.getShaderHash(pipelineHandle.handle));
+
 
 		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
@@ -878,82 +835,6 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 	}
 }
 
-
-
-static bool containsAnyHash(
-	const std::unordered_set<uint32_t>& frameHashes,
-	const std::unordered_set<uint32_t>& watchHashes)
-{
-	for (uint32_t hash : watchHashes)
-	{
-		if (frameHashes.find(hash) != frameHashes.end())
-			return true;
-	}
-
-	return false;
-}
-
-static bool isReactiveWatcherPresent(const ToggleGroup& group)
-{
-	return
-		containsAnyHash(g_frameActivePixelHashes, group.getReactivePixelShaderHashes()) ||
-		containsAnyHash(g_frameActiveVertexHashes, group.getReactiveVertexShaderHashes()) ||
-		containsAnyHash(g_frameActiveComputeHashes, group.getReactiveComputeShaderHashes());
-}
-
-static void updateReactiveGroup(ToggleGroup& group)
-{
-	if (!group.isReactiveTriggerEnabled())
-		return;
-
-	const bool watcherPresent = isReactiveWatcherPresent(group);
-	const int groupId = group.getId();
-
-	if (watcherPresent)
-	{
-		g_reactivePresentFrames[groupId]++;
-		g_reactiveAbsentFrames[groupId] = 0;
-	}
-	else
-	{
-		g_reactiveAbsentFrames[groupId]++;
-		g_reactivePresentFrames[groupId] = 0;
-	}
-
-	if (g_reactivePresentFrames[groupId] >= g_reactiveEnterFrames)
-	{
-		if (!g_reactiveHasPreviousState[groupId])
-		{
-			g_reactivePreviousState[groupId] = group.isActive();
-			g_reactiveHasPreviousState[groupId] = true;
-		}
-
-		switch (group.getReactiveTriggerMode())
-		{
-		case ToggleGroup::ReactiveTriggerMode::ActivateWhilePresent:
-			setGroupActiveWithEditRefresh(group, true);
-			break;
-
-		case ToggleGroup::ReactiveTriggerMode::DeactivateWhilePresent:
-			setGroupActiveWithEditRefresh(group, false);
-			break;
-
-		default:
-			break;
-		}
-	}
-
-	if (g_reactiveAbsentFrames[groupId] >= g_reactiveExitFrames)
-	{
-		if (g_reactiveHasPreviousState[groupId])
-		{
-			setGroupActiveWithEditRefresh(group, g_reactivePreviousState[groupId]);
-			g_reactiveHasPreviousState[groupId] = false;
-		}
-	}
-}
-
-
 static void onReshadePresent(effect_runtime* runtime)
 {
 	if (g_activeCollectorFrameCounter > 0)
@@ -966,6 +847,13 @@ static void onReshadePresent(effect_runtime* runtime)
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
 		const bool timedTriggerActiveNow = isAnyTimedTriggerActive(group, runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
+
+		if (group.isReactiveTriggerEnabled())
+		{
+			updateReactiveGroup(group);
+			g_groupHotkeyWasDown[group.getId()] = isDownNow;
+			continue;
+		}
 
 		if (group.isTimedMode())
 		{
@@ -1234,6 +1122,9 @@ static void onReshadePresent(effect_runtime* runtime)
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
 	s_prevNP9Down = np9Down;
+	g_frameActivePixelHashes.clear();
+	g_frameActiveVertexHashes.clear();
+	g_frameActiveComputeHashes.clear();
 }
 
 void endKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
@@ -1462,7 +1353,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::Separator();
 
 		std::vector<int> idsToRemove;
-		int idToDuplicate = -1;
 
 		for (auto& group : g_toggleGroups)
 		{
@@ -1486,7 +1376,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			if (ImGui::Button("Duplicate"))
 			{
-				idToDuplicate = group.getId();
+				g_toggleGroups.push_back(group.makeDuplicate());
+				saveShaderTogglerIniFile();
 			}
 
 			ImGui::SameLine();
@@ -1819,6 +1710,33 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					ImGui::PopItemWidth();
 				}
 
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				bool reactiveEnabled = group.isReactiveTriggerEnabled();
+				if (ImGui::Checkbox("Reactive gameplay trigger", &reactiveEnabled))
+				{
+					group.setReactiveTriggerEnabled(reactiveEnabled);
+				}
+				ImGui::SameLine();
+				showHelpMarker("Automatically switches this group while a watcher shader is detected in the current frame. Useful for cutscene/conversation effects such as temporary DOF control.");
+				ImGui::PopItemWidth();
+
+				if (group.isReactiveTriggerEnabled())
+				{
+					int reactiveMode = ToggleGroup::reactiveTriggerModeToInt(group.getReactiveTriggerMode());
+					const char* reactiveModeItems[] = { "Disabled", "Activate while present", "Deactivate while present" };
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.45f);
+					ImGui::Text("Reactive mode");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					if (ImGui::Combo("##ReactiveTriggerMode", &reactiveMode, reactiveModeItems, IM_ARRAYSIZE(reactiveModeItems)))
+					{
+						group.setReactiveTriggerMode(ToggleGroup::reactiveTriggerModeFromInt(reactiveMode));
+					}
+					ImGui::PopItemWidth();
+				}
+
 				if (!isKeyEditing)
 				{
 					if (ImGui::Button("OK"))
@@ -1835,28 +1753,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			}
 
 			ImGui::PopID();
-		}
-
-		if (idToDuplicate >= 0)
-		{
-			ToggleGroup duplicate("", ToggleGroup::getNewGroupId());
-			bool hasDuplicate = false;
-
-			for (const auto& group : g_toggleGroups)
-			{
-				if (group.getId() == idToDuplicate)
-				{
-					duplicate = group.makeDuplicate();
-					hasDuplicate = true;
-					break;
-				}
-			}
-
-			if (hasDuplicate)
-			{
-				g_toggleGroups.push_back(duplicate);
-				saveShaderTogglerIniFile();
-			}
 		}
 
 		if (!idsToRemove.empty())
@@ -1885,6 +1781,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				g_groupLastTimedTriggerTime.erase(id);
 				g_groupTimedVisibleSince.erase(id);
 				g_groupTimedFadeOutStart.erase(id);
+			g_reactivePresentFrames.erase(id);
+			g_reactiveAbsentFrames.erase(id);
+			g_reactivePreviousState.erase(id);
+			g_reactiveHasPreviousState.erase(id);
 			}
 
 			saveShaderTogglerIniFile();
@@ -1903,32 +1803,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (ImGui::CollapsingHeader("Group Order", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
-		ImGui::SameLine();
-		showHelpMarker("Manual ordering is preserved unless a sort button is used.");
-
-		if (ImGui::Button("Sort by hotkey layout"))
-		{
-			sortToggleGroupsByHotkey();
-		}
-		ImGui::SameLine();
-		showHelpMarker("Sorts groups in the Gametism layout order: End, Numpad / * - +, Backspace/Page keys, arrows, Numpad 7/8/9/0/Decimal, Insert/Delete.");
-
-		ImGui::SameLine();
-		if (ImGui::Button("Sort A-Z"))
-		{
-			sortToggleGroupsByNameAZ();
-		}
-		ImGui::SameLine();
-		showHelpMarker("Sorts groups alphabetically by name, ignoring letter case.");
-
-		ImGui::SameLine();
-		if (ImGui::Button("Sort by name length"))
-		{
-			sortToggleGroupsByNameLength();
-		}
-		ImGui::SameLine();
-		showHelpMarker("Sorts groups from shortest name to longest name. Groups with the same name length are sorted alphabetically.");
-
 		ImGui::Separator();
 
 		float computedHeight = 45.0f * static_cast<float>(g_toggleGroups.size()) + 20.0f;

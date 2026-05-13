@@ -20,7 +20,7 @@ This version adds:
 - multiple timed trigger keys with configurable trigger modes
 - a global hotkey modifier system for all defined hotkeys
 - improved shader detection behavior for DXVK and RenoDX (DX9)
-- **sorting buttons**
+- **sorting functions**
 
 ---
 

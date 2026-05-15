@@ -223,10 +223,9 @@ namespace ShaderToggler
 
 		std::unique_lock collectedLock(_collectedActiveHandlesMutex);
 
-		if (_huntShaderHashesSnapshot.empty())
-		{
-			rebuildHuntSnapshotLocked();
-		}
+		// Rebuild every time while browsing. Some D3D11 games expose/rotate active
+		// shader sets late or dynamically, so a one-time snapshot can stay empty/stale.
+		rebuildHuntSnapshotLocked();
 
 		if (_huntShaderHashesSnapshot.empty())
 		{
@@ -288,10 +287,9 @@ namespace ShaderToggler
 
 		std::unique_lock collectedLock(_collectedActiveHandlesMutex);
 
-		if (_huntShaderHashesSnapshot.empty())
-		{
-			rebuildHuntSnapshotLocked();
-		}
+		// Rebuild every time while browsing. Some D3D11 games expose/rotate active
+		// shader sets late or dynamically, so a one-time snapshot can stay empty/stale.
+		rebuildHuntSnapshotLocked();
 
 		if (_huntShaderHashesSnapshot.empty())
 		{

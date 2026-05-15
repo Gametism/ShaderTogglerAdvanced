@@ -169,6 +169,88 @@ static std::string toHex64(uint64_t value)
 	return std::string(buf);
 }
 
+static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
+{
+	const uint8_t keyCode = group.getToggleKey().getKeyCode();
+
+	switch (keyCode)
+	{
+	case VK_END:      return 0;
+
+	case VK_DIVIDE:   return 10;
+	case VK_MULTIPLY: return 11;
+	case VK_SUBTRACT: return 12;
+	case VK_ADD:      return 13;
+
+	case VK_BACK:     return 20;
+	case VK_PRIOR:    return 21;
+	case VK_NEXT:     return 22;
+
+	case VK_UP:       return 30;
+	case VK_RIGHT:    return 31;
+	case VK_DOWN:     return 32;
+	case VK_LEFT:     return 33;
+
+	case VK_NUMPAD7:  return 40;
+	case VK_NUMPAD8:  return 41;
+	case VK_NUMPAD9:  return 42;
+	case VK_NUMPAD0:  return 43;
+	case VK_DECIMAL:  return 44;
+
+	case VK_INSERT:   return 50;
+	case VK_DELETE:   return 51;
+
+	default:
+		return 1000 + static_cast<int>(keyCode);
+	}
+}
+
+static void sortToggleGroupsByHotkey()
+{
+	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
+		[](const ToggleGroup& a, const ToggleGroup& b)
+		{
+			const int priorityA = getHotkeyLayoutSortPriority(a);
+			const int priorityB = getHotkeyLayoutSortPriority(b);
+
+			if (priorityA != priorityB)
+			{
+				return priorityA < priorityB;
+			}
+
+			const int keyA = a.getToggleKey().toInt();
+			const int keyB = b.getToggleKey().toInt();
+
+			if (keyA != keyB)
+			{
+				return keyA < keyB;
+			}
+
+			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
+		});
+
+	saveShaderTogglerIniFile();
+}
+
+static void sortToggleGroupsByNameAZ()
+{
+	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
+		[](const ToggleGroup& a, const ToggleGroup& b)
+		{
+			const std::string nameA = toLowerCopy(a.getName());
+			const std::string nameB = toLowerCopy(b.getName());
+
+			if (nameA != nameB)
+			{
+				return nameA < nameB;
+			}
+
+			return a.getId() < b.getId();
+		});
+
+	saveShaderTogglerIniFile();
+}
+
 static void sortToggleGroupsByNameLength()
 {
 	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
@@ -1908,6 +1990,22 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::SameLine();
 		showHelpMarker("Manual ordering is preserved unless a sort button is used.");
 
+		if (ImGui::Button("Sort by hotkey layout"))
+		{
+			sortToggleGroupsByHotkey();
+		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups in the Gametism layout order: End, Numpad / * - +, Backspace/Page keys, arrows, Numpad 7/8/9/0/Decimal, Insert/Delete.");
+
+		ImGui::SameLine();
+		if (ImGui::Button("Sort A-Z"))
+		{
+			sortToggleGroupsByNameAZ();
+		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups alphabetically by name, ignoring letter case.");
+
+		ImGui::SameLine();
 		if (ImGui::Button("Sort by name length"))
 		{
 			sortToggleGroupsByNameLength();

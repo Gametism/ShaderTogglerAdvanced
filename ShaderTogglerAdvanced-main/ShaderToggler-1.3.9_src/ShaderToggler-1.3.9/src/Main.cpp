@@ -856,58 +856,58 @@ bool blockDrawCallForCommandList(command_list* commandList)
 
 static bool onDraw(command_list* commandList, uint32_t, uint32_t, uint32_t, uint32_t)
 {
-\tif (g_activeCollectorFrameCounter > 0 && commandList != nullptr)
-\t{
-\t\tconst CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	if (g_activeCollectorFrameCounter > 0 && commandList != nullptr)
+	{
+		const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
-\t\tif (commandListData.activePixelShaderPipeline != static_cast<uint64_t>(-1) &&
-\t\t\tcommandListData.activePixelShaderPipeline != 0)
-\t\t{
-\t\t\tg_pixelShaderManager.addActivePipelineHandle(commandListData.activePixelShaderPipeline);
-\t\t}
+		if (commandListData.activePixelShaderPipeline != static_cast<uint64_t>(-1) &&
+			commandListData.activePixelShaderPipeline != 0)
+		{
+			g_pixelShaderManager.addActivePipelineHandle(commandListData.activePixelShaderPipeline);
+		}
 
-\t\tif (commandListData.activeVertexShaderPipeline != static_cast<uint64_t>(-1) &&
-\t\t\tcommandListData.activeVertexShaderPipeline != 0)
-\t\t{
-\t\t\tg_vertexShaderManager.addActivePipelineHandle(commandListData.activeVertexShaderPipeline);
-\t\t}
+		if (commandListData.activeVertexShaderPipeline != static_cast<uint64_t>(-1) &&
+			commandListData.activeVertexShaderPipeline != 0)
+		{
+			g_vertexShaderManager.addActivePipelineHandle(commandListData.activeVertexShaderPipeline);
+		}
 
-\t\tif (commandListData.activeComputeShaderPipeline != static_cast<uint64_t>(-1) &&
-\t\t\tcommandListData.activeComputeShaderPipeline != 0)
-\t\t{
-\t\t\tg_computeShaderManager.addActivePipelineHandle(commandListData.activeComputeShaderPipeline);
-\t\t}
-\t}
+		if (commandListData.activeComputeShaderPipeline != static_cast<uint64_t>(-1) &&
+			commandListData.activeComputeShaderPipeline != 0)
+		{
+			g_computeShaderManager.addActivePipelineHandle(commandListData.activeComputeShaderPipeline);
+		}
+	}
 
-\treturn blockDrawCallForCommandList(commandList);
+	return blockDrawCallForCommandList(commandList);
 }
 
 static bool onDrawIndexed(command_list* commandList, uint32_t, uint32_t, uint32_t, int32_t, uint32_t)
 {
-\tif (g_activeCollectorFrameCounter > 0 && commandList != nullptr)
-\t{
-\t\tconst CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	if (g_activeCollectorFrameCounter > 0 && commandList != nullptr)
+	{
+		const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
-\t\tif (commandListData.activePixelShaderPipeline != static_cast<uint64_t>(-1) &&
-\t\t\tcommandListData.activePixelShaderPipeline != 0)
-\t\t{
-\t\t\tg_pixelShaderManager.addActivePipelineHandle(commandListData.activePixelShaderPipeline);
-\t\t}
+		if (commandListData.activePixelShaderPipeline != static_cast<uint64_t>(-1) &&
+			commandListData.activePixelShaderPipeline != 0)
+		{
+			g_pixelShaderManager.addActivePipelineHandle(commandListData.activePixelShaderPipeline);
+		}
 
-\t\tif (commandListData.activeVertexShaderPipeline != static_cast<uint64_t>(-1) &&
-\t\t\tcommandListData.activeVertexShaderPipeline != 0)
-\t\t{
-\t\t\tg_vertexShaderManager.addActivePipelineHandle(commandListData.activeVertexShaderPipeline);
-\t\t}
+		if (commandListData.activeVertexShaderPipeline != static_cast<uint64_t>(-1) &&
+			commandListData.activeVertexShaderPipeline != 0)
+		{
+			g_vertexShaderManager.addActivePipelineHandle(commandListData.activeVertexShaderPipeline);
+		}
 
-\t\tif (commandListData.activeComputeShaderPipeline != static_cast<uint64_t>(-1) &&
-\t\t\tcommandListData.activeComputeShaderPipeline != 0)
-\t\t{
-\t\t\tg_computeShaderManager.addActivePipelineHandle(commandListData.activeComputeShaderPipeline);
-\t\t}
-\t}
+		if (commandListData.activeComputeShaderPipeline != static_cast<uint64_t>(-1) &&
+			commandListData.activeComputeShaderPipeline != 0)
+		{
+			g_computeShaderManager.addActivePipelineHandle(commandListData.activeComputeShaderPipeline);
+		}
+	}
 
-\treturn blockDrawCallForCommandList(commandList);
+	return blockDrawCallForCommandList(commandList);
 }
 
 static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource, uint64_t, uint32_t, uint32_t)

@@ -3,14 +3,12 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
-#include <cstdint>
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
 
 namespace ShaderToggler
 {
-	//
 	static constexpr const char* STA_TOGGLEGROUP_OWNER_TAG = "Gametism::ToggleGroup::Official";
 	static constexpr const char* STA_TOGGLEGROUP_AUTHOR_TAG = "Sven 'Gametism' Koenigsmann";
 	static constexpr const char* STA_TOGGLEGROUP_PROJECT_TAG = "ShaderToggler Advanced";
@@ -118,17 +116,11 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
-		void clearDrawFingerprints();
-		void storeCollectedDrawFingerprints(const std::unordered_set<uint64_t>& drawFingerprints);
-		const std::unordered_set<uint64_t>& getDrawFingerprints() const;
-		bool hasDrawFingerprints() const;
-
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
 		ToggleGroup makeDuplicate() const;
 
-		// Harmless provenance accessors for diagnostics/ownership continuity.
 		static constexpr const char* getProvenanceOwnerTag() { return STA_TOGGLEGROUP_OWNER_TAG; }
 		static constexpr const char* getProvenanceAuthorTag() { return STA_TOGGLEGROUP_AUTHOR_TAG; }
 		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
@@ -154,6 +146,5 @@ namespace ShaderToggler
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
-		std::unordered_set<uint64_t> m_drawFingerprints;
 	};
 }

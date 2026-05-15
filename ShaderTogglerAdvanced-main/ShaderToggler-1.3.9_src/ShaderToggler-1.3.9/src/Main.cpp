@@ -75,13 +75,12 @@ static std::vector<ToggleGroup> g_toggleGroups;
 static std::atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static std::atomic_int g_toggleGroupIdTimedTriggerKeyEditing = -1;
 static std::atomic_int g_toggleGroupTimedTriggerKeySlotEditing = -1;
-static std::atomic_int g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-static std::atomic_int g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 static std::atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
+// 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
@@ -89,10 +88,12 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTim
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
 static const int g_groupHotkeyDebounceMs = 150;
 
+// 
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static std::chrono::steady_clock::time_point s_holdStartNP1, s_holdStartNP2, s_holdStartNP4, s_holdStartNP5, s_holdStartNP7, s_holdStartNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 
+//
 static bool s_prevNP1Down = false;
 static bool s_prevNP2Down = false;
 static bool s_prevNP3Down = false;
@@ -108,9 +109,11 @@ static const int s_holdRepeatMidMs = 120;
 static const int s_holdRepeatFastMs = 70;
 static const int s_holdRepeatVeryFastMs = 35;
 
+//
 static const char* GT_CREATOR = "Gametism";
 static const char* GT_CACHE_KEY = "CacheStamp";
 
+//
 static const char* GT_SIG_A = "STA";
 static const char* GT_SIG_B = "Gametism";
 static const char* GT_SIG_C = "ShaderToggler";
@@ -325,20 +328,6 @@ static bool isAnyTimedTriggerActive(const ToggleGroup& group, reshade::api::effe
 	return group.getToggleKey().isKeyPressed(runtime);
 }
 
-static bool isAnyTimedSuppressionKeyDown(const ToggleGroup& group, reshade::api::effect_runtime* runtime)
-{
-	if (!group.hasTimedSuppressionKeys())
-		return false;
-
-	for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
-	{
-		if (group.getTimedSuppressionKeyAt(i).isKeyDown(runtime))
-			return true;
-	}
-
-	return false;
-}
-
 static void setGroupActiveWithEditRefresh(ToggleGroup& group, bool newActive)
 {
 	const bool previousActive = group.isActive();
@@ -356,6 +345,7 @@ static std::string buildIniSignature()
 {
 	std::string data;
 
+	//
 	data += "Creator=";
 	data += GT_CREATOR;
 	data += "|AmountGroups=";
@@ -365,6 +355,7 @@ static std::string buildIniSignature()
 	data += "|GlobalHotkeyModifier=";
 	data += std::to_string(KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()));
 
+	//
 	data += "|SigA=";
 	data += GT_SIG_A;
 	data += "|SigB=";
@@ -394,12 +385,6 @@ static std::string buildIniSignature()
 		{
 			data += "|TimedTriggerKey" + std::to_string(i) + "=" + std::to_string(group.getTimedTriggerKeyAt(i).toInt());
 			data += "|TimedTriggerMode" + std::to_string(i) + "=" + std::to_string(ToggleGroup::timedTriggerModeToInt(group.getTimedTriggerModeAt(i)));
-		}
-
-		data += "|TimedSuppressionCount=" + std::to_string(group.getTimedSuppressionKeyCount());
-		for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
-		{
-			data += "|TimedSuppressionKey" + std::to_string(i) + "=" + std::to_string(group.getTimedSuppressionKeyAt(i).toInt());
 		}
 
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
@@ -465,57 +450,6 @@ static uint32_t calculateShaderHash(void* shaderData)
 	const auto shaderDesc = *static_cast<shader_desc *>(shaderData);
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
-
-static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_stage stages, const char* shaderTypeTag)
-{
-	std::string data;
-	data += "STA_BIND_FALLBACK_SHADER|";
-	data += shaderTypeTag;
-	data += "|";
-	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
-	data += "|";
-	data += std::to_string(static_cast<unsigned long long>(static_cast<uint32_t>(stages)));
-
-	const uint64_t hash64 = fnv1a64(data);
-	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
-
-	if (hash32 == 0)
-		hash32 = 1;
-
-	return hash32;
-}
-
-
-
-static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
-{
-	std::string data;
-	data += "STA_FALLBACK_SHADER|";
-	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
-	data += "|";
-	data += std::to_string(static_cast<int>(type));
-	data += "|";
-	data += std::to_string(subobjectIndex);
-
-	const uint64_t hash64 = fnv1a64(data);
-	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
-
-	if (hash32 == 0)
-		hash32 = 1;
-
-	return hash32;
-}
-
-static uint32_t calculateShaderHashWithFallback(void* shaderData, pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
-{
-	const uint32_t realHash = calculateShaderHash(shaderData);
-
-	if (realHash != 0)
-		return realHash;
-
-	return calculateFallbackPipelineHash(pipelineHandle, type, subobjectIndex);
-}
-
 
 static void applyModernUiStyle()
 {
@@ -700,31 +634,19 @@ static void onResetCommandList(command_list *commandList)
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
-	if (pipelineHandle.handle == 0 || subobjects == nullptr || subobjectCount == 0)
-		return;
-
 	for (uint32_t i = 0; i < subobjectCount; ++i)
 	{
-		const uint32_t shaderHash = calculateShaderHashWithFallback(
-			subobjects[i].data,
-			pipelineHandle,
-			subobjects[i].type,
-			i);
-
 		switch (subobjects[i].type)
 		{
 		case pipeline_subobject_type::vertex_shader:
-			g_vertexShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+			g_vertexShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
 			break;
-
 		case pipeline_subobject_type::pixel_shader:
-			g_pixelShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+			g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
 			break;
-
 		case pipeline_subobject_type::compute_shader:
-			g_computeShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+			g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
 			break;
-
 		default:
 			break;
 		}
@@ -819,74 +741,47 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
-	if (nullptr == commandList || pipelineHandle.handle == 0)
+	if (nullptr != commandList && pipelineHandle.handle != 0)
 	{
-		return;
-	}
+		const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
+		const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
+		const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
 
-	const bool stageIncludesPixelShader = (stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader;
-	const bool stageIncludesVertexShader = (stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader;
-	const bool stageIncludesComputeShader = (stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader;
+		if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
+		{
+			return;
+		}
 
-	if (stageIncludesPixelShader && !g_pixelShaderManager.isKnownHandle(pipelineHandle.handle))
-	{
-		g_pixelShaderManager.addHashHandlePair(
-			calculateFallbackPipelineHash(pipelineHandle, stages, "PS"),
-			pipelineHandle.handle);
-	}
+		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
-	if (stageIncludesVertexShader && !g_vertexShaderManager.isKnownHandle(pipelineHandle.handle))
-	{
-		g_vertexShaderManager.addHashHandlePair(
-			calculateFallbackPipelineHash(pipelineHandle, stages, "VS"),
-			pipelineHandle.handle);
-	}
+		if (g_activeCollectorFrameCounter > 0)
+		{
+			if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		}
+		else
+		{
+			commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
+			commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
+			commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
+		}
 
-	if (stageIncludesComputeShader && !g_computeShaderManager.isKnownHandle(pipelineHandle.handle))
-	{
-		g_computeShaderManager.addHashHandlePair(
-			calculateFallbackPipelineHash(pipelineHandle, stages, "CS"),
-			pipelineHandle.handle);
-	}
-
-	const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
-	const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
-	const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
-
-	if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
-	{
-		return;
-	}
-
-	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
-
-	if (g_activeCollectorFrameCounter > 0)
-	{
-		if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-	}
-	else
-	{
-		commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
-		commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
-		commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
-	}
-
-	if (stageIncludesPixelShader && handleHasPixelShaderAttached)
-	{
-		if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		commandListData.activePixelShaderPipeline = pipelineHandle.handle;
-	}
-	if (stageIncludesVertexShader && handleHasVertexShaderAttached)
-	{
-		if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
-	}
-	if (stageIncludesComputeShader && handleHasComputeShaderAttached)
-	{
-		if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
+		if ((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader && handleHasPixelShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activePixelShaderPipeline = pipelineHandle.handle;
+		}
+		if ((stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader && handleHasVertexShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
+		}
+		if ((stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader && handleHasComputeShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
+		}
 	}
 }
 
@@ -978,24 +873,13 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
-		const bool timedSuppressedNow = isAnyTimedSuppressionKeyDown(group, runtime);
-		const bool timedTriggerActiveNow = !timedSuppressedNow && isAnyTimedTriggerActive(group, runtime);
+		const bool timedTriggerActiveNow = isAnyTimedTriggerActive(group, runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
 
 		if (group.isTimedMode())
 		{
 			const bool timedTargetActiveState = !group.isTimedModeInverted();
 			const bool timedRestingActiveState = group.isTimedModeInverted();
-
-			if (timedSuppressedNow)
-			{
-				setGroupActiveWithEditRefresh(group, timedRestingActiveState);
-				g_groupLastTimedTriggerTime.erase(group.getId());
-				g_groupTimedVisibleSince.erase(group.getId());
-				g_groupTimedFadeOutStart.erase(group.getId());
-				g_groupHotkeyWasDown[group.getId()] = isDownNow;
-				continue;
-			}
 
 			if (timedTriggerActiveNow)
 			{
@@ -1287,12 +1171,6 @@ void startKeyBindingEditing(ToggleGroup& groupEditing)
 		g_toggleGroupTimedTriggerKeySlotEditing = -1;
 		g_keyCollector.clear();
 	}
-	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
-	{
-		g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-		g_toggleGroupTimedSuppressionKeySlotEditing = -1;
-		g_keyCollector.clear();
-	}
 	g_toggleGroupIdKeyBindingEditing = groupEditing.getId();
 }
 
@@ -1335,61 +1213,8 @@ void startTimedTriggerKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex
 		g_toggleGroupIdKeyBindingEditing = -1;
 		g_keyCollector.clear();
 	}
-	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
-	{
-		g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-		g_toggleGroupTimedSuppressionKeySlotEditing = -1;
-		g_keyCollector.clear();
-	}
 	g_toggleGroupIdTimedTriggerKeyEditing = groupEditing.getId();
 	g_toggleGroupTimedTriggerKeySlotEditing = slotIndex;
-}
-
-void endTimedSuppressionKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
-{
-	if (acceptCollectedBinding &&
-		g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
-		g_toggleGroupTimedSuppressionKeySlotEditing >= 0 &&
-		g_keyCollector.isValid())
-	{
-		groupEditing.setTimedSuppressionKeyAt(
-			static_cast<size_t>(g_toggleGroupTimedSuppressionKeySlotEditing),
-			g_keyCollector);
-	}
-
-	g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-	g_toggleGroupTimedSuppressionKeySlotEditing = -1;
-	g_keyCollector.clear();
-}
-
-void startTimedSuppressionKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex)
-{
-	if (g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
-		g_toggleGroupTimedSuppressionKeySlotEditing == slotIndex)
-	{
-		return;
-	}
-
-	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
-	{
-		endTimedSuppressionKeyBindingEditing(false, groupEditing);
-	}
-
-	if (g_toggleGroupIdKeyBindingEditing >= 0)
-	{
-		g_toggleGroupIdKeyBindingEditing = -1;
-		g_keyCollector.clear();
-	}
-
-	if (g_toggleGroupIdTimedTriggerKeyEditing >= 0)
-	{
-		g_toggleGroupIdTimedTriggerKeyEditing = -1;
-		g_toggleGroupTimedTriggerKeySlotEditing = -1;
-		g_keyCollector.clear();
-	}
-
-	g_toggleGroupIdTimedSuppressionKeyEditing = groupEditing.getId();
-	g_toggleGroupTimedSuppressionKeySlotEditing = slotIndex;
 }
 
 void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
@@ -1440,13 +1265,12 @@ static void showHelpMarker(const char* desc)
 		ImGui::EndTooltip();
 	}
 }
+
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
 	applyModernUiStyle();
 
-	if (g_toggleGroupIdKeyBindingEditing >= 0 ||
-		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
-		g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	if (g_toggleGroupIdKeyBindingEditing >= 0 || g_toggleGroupIdTimedTriggerKeyEditing >= 0)
 	{
 		g_keyCollector.collectKeysPressed(runtime);
 	}
@@ -1609,11 +1433,11 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text(group.isTimedModeInverted() ? " Auto-show " : " Auto-hide ");
 				ImGui::PopStyleColor();
 
-				if (group.hasTimedSuppressionKeys())
+				if (g_groupTimedFadeOutStart.find(group.getId()) != g_groupTimedFadeOutStart.end())
 				{
 					ImGui::SameLine();
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.55f, 0.35f, 1.0f));
-					ImGui::Text(" Suppression ");
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.65f, 0.30f, 1.0f));
+					ImGui::Text(" Fade-out ");
 					ImGui::PopStyleColor();
 				}
 			}
@@ -1810,113 +1634,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				}
 				ImGui::PopItemWidth();
 
-				ImGui::Text("Timed suppression keys");
-				ImGui::SameLine();
-				showHelpMarker("These keys prevent timed mode from activating while held. Useful for combo inputs like RT + Y / RT + B where the base trigger should be ignored.");
-
-				for (size_t suppressionIndex = 0; suppressionIndex < group.getTimedSuppressionKeyCount(); ++suppressionIndex)
-				{
-					ImGui::PushID(static_cast<int>(10000 + suppressionIndex));
-
-					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-					ImGui::Text(" ");
-					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-
-					std::string suppressionTextBoxContents =
-						(g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
-						 g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
-							? g_keyCollector.getKeyAsString()
-							: group.getTimedSuppressionKeyAsString(suppressionIndex);
-
-					char suppressionBuf[128] = {};
-					strncpy_s(suppressionBuf, sizeof(suppressionBuf), suppressionTextBoxContents.c_str(), _TRUNCATE);
-					ImGui::InputText("##TimedSuppression", suppressionBuf, sizeof(suppressionBuf), ImGuiInputTextFlags_ReadOnly);
-
-					if (ImGui::IsItemClicked())
-					{
-						startTimedSuppressionKeyBindingEditing(group, static_cast<int>(suppressionIndex));
-					}
-
-					if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
-						g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
-					{
-						isKeyEditing = true;
-						ImGui::SameLine();
-						if (ImGui::Button("OK##TimedSuppression"))
-						{
-							endTimedSuppressionKeyBindingEditing(true, group);
-						}
-						ImGui::SameLine();
-						if (ImGui::Button("Cancel##TimedSuppression"))
-						{
-							endTimedSuppressionKeyBindingEditing(false, group);
-						}
-					}
-
-					ImGui::SameLine();
-					if (ImGui::Button("Remove##TimedSuppression"))
-					{
-						group.removeTimedSuppressionKeyAt(suppressionIndex);
-
-						if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId())
-						{
-							if (g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
-							{
-								g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-								g_toggleGroupTimedSuppressionKeySlotEditing = -1;
-								g_keyCollector.clear();
-							}
-							else if (g_toggleGroupTimedSuppressionKeySlotEditing > static_cast<int>(suppressionIndex))
-							{
-								--g_toggleGroupTimedSuppressionKeySlotEditing;
-							}
-						}
-
-						ImGui::PopItemWidth();
-						ImGui::PopID();
-						break;
-					}
-
-					ImGui::PopItemWidth();
-					ImGui::PopID();
-				}
-
-				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
-				ImGui::Text(" ");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-
-				std::string addSuppressionText =
-					(g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
-					 g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(group.getTimedSuppressionKeyCount()))
-						? g_keyCollector.getKeyAsString()
-						: std::string("Add suppression key");
-
-				char addSuppressionBuf[128] = {};
-				strncpy_s(addSuppressionBuf, sizeof(addSuppressionBuf), addSuppressionText.c_str(), _TRUNCATE);
-				ImGui::InputText("##AddTimedSuppression", addSuppressionBuf, sizeof(addSuppressionBuf), ImGuiInputTextFlags_ReadOnly);
-
-				if (ImGui::IsItemClicked())
-				{
-					startTimedSuppressionKeyBindingEditing(group, static_cast<int>(group.getTimedSuppressionKeyCount()));
-				}
-
-				if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
-					g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(group.getTimedSuppressionKeyCount()))
-				{
-					isKeyEditing = true;
-					ImGui::SameLine();
-					if (ImGui::Button("OK##AddTimedSuppression"))
-					{
-						endTimedSuppressionKeyBindingEditing(true, group);
-					}
-					ImGui::SameLine();
-					if (ImGui::Button("Cancel##AddTimedSuppression"))
-					{
-						endTimedSuppressionKeyBindingEditing(false, group);
-					}
-				}
-				ImGui::PopItemWidth();
-
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
@@ -1959,7 +1676,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setTimedMode(timedMode);
 				}
 				ImGui::SameLine();
-				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used. Suppression keys can prevent this during combo inputs.");
+				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used.");
 				ImGui::PopItemWidth();
 
 				if (group.isTimedMode())
@@ -2019,8 +1736,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						g_toggleGroupIdKeyBindingEditing = -1;
 						g_toggleGroupIdTimedTriggerKeyEditing = -1;
 						g_toggleGroupTimedTriggerKeySlotEditing = -1;
-						g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-						g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 						g_keyCollector.clear();
 						saveShaderTogglerIniFile();
 					}
@@ -2058,8 +1773,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			g_toggleGroupIdKeyBindingEditing = -1;
 			g_toggleGroupIdTimedTriggerKeyEditing = -1;
 			g_toggleGroupTimedTriggerKeySlotEditing = -1;
-			g_toggleGroupIdTimedSuppressionKeyEditing = -1;
-			g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 			g_keyCollector.clear();
 			g_toggleGroupIdShaderEditing = -1;
 			g_pixelShaderManager.stopHuntingMode();

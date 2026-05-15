@@ -2,15 +2,17 @@
 #include "CDataFile.h"
 #include <sstream>
 #include <vector>
-
+//GT
 namespace ShaderToggler
 {
 	namespace
 	{
+		//
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_A = "STA::TG::Gametism";
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_B = "STA::TG::SvenKoenigsmann";
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_C = "STA::TG::ShaderTogglerAdvanced";
 
+		//
 		static inline const char* preserve_togglegroup_provenance()
 		{
 			return STA_TOGGLEGROUP_UNIT_TAG_A;
@@ -121,7 +123,7 @@ namespace ShaderToggler
 
 		m_timedModeFadeOutMs = fadeOutMs;
 	}
-
+//GT
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
 		m_toggleKey.setKey(newKeyValue, shiftRequired, altRequired, ctrlRequired);
@@ -338,7 +340,7 @@ namespace ShaderToggler
 		m_vertexShaderHashes.clear();
 		m_computeShaderHashes.clear();
 	}
-
+//GT
 	void ToggleGroup::storeCollectedHashes(
 		const std::unordered_set<uint32_t>& pixel,
 		const std::unordered_set<uint32_t>& vertex,
@@ -362,7 +364,7 @@ namespace ShaderToggler
 		copy.m_editing = false;
 		return copy;
 	}
-
+//GT
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
@@ -413,10 +415,9 @@ namespace ShaderToggler
 			m_timedModeFadeOutMs = 150;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			m_timedTriggerKeys.clear();
-			m_timedSuppressionKeys.clear();
 			return;
 		}
-
+//GT
 		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
 		const std::string sectionRoot = prefix + std::to_string(index);
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
@@ -438,7 +439,7 @@ namespace ShaderToggler
 			if (hash != UINT_MAX)
 				m_pixelShaderHashes.insert(hash);
 		}
-
+//GT
 		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
 		for (int i = 0; i < amountShaders; i++)
 		{
@@ -548,7 +549,7 @@ namespace ShaderToggler
 			m_holdInverted = false;
 		}
 	}
-
+//GT 
 	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
 	{
 		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
@@ -612,8 +613,10 @@ namespace ShaderToggler
 
 			for (const KeyData& key : m_timedSuppressionKeys)
 			{
-				if (key.isValid())
-					timedSuppressionKeyValues.push_back(static_cast<uint32_t>(key.toInt()));
+				if (!key.isValid())
+					continue;
+
+				timedSuppressionKeyValues.push_back(static_cast<uint32_t>(key.toInt()));
 			}
 
 			iniFile.SetArray("TimedSuppressionKeys", timedSuppressionKeyValues, "", sectionRoot);
@@ -629,3 +632,4 @@ namespace ShaderToggler
 		iniFile.SetInt("TimedModeFadeOutMs", m_timedModeFadeOutMs, "", sectionRoot);
 	}
 }
+//GT

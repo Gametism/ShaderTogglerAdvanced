@@ -486,6 +486,57 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
+static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_stage stages, const char* shaderTypeTag)
+{
+	std::string data;
+	data += "STA_BIND_FALLBACK_SHADER|";
+	data += shaderTypeTag;
+	data += "|";
+	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
+	data += "|";
+	data += std::to_string(static_cast<unsigned long long>(static_cast<uint32_t>(stages)));
+
+	const uint64_t hash64 = fnv1a64(data);
+	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
+
+	if (hash32 == 0)
+		hash32 = 1;
+
+	return hash32;
+}
+
+
+
+static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
+{
+	std::string data;
+	data += "STA_FALLBACK_SHADER|";
+	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
+	data += "|";
+	data += std::to_string(static_cast<int>(type));
+	data += "|";
+	data += std::to_string(subobjectIndex);
+
+	const uint64_t hash64 = fnv1a64(data);
+	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
+
+	if (hash32 == 0)
+		hash32 = 1;
+
+	return hash32;
+}
+
+static uint32_t calculateShaderHashWithFallback(void* shaderData, pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
+{
+	const uint32_t realHash = calculateShaderHash(shaderData);
+
+	if (realHash != 0)
+		return realHash;
+
+	return calculateFallbackPipelineHash(pipelineHandle, type, subobjectIndex);
+}
+
+
 static void applyModernUiStyle()
 {
 	if (g_uiStyleInitialized)
@@ -670,19 +721,31 @@ static void onResetCommandList(command_list *commandList)
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
+	if (pipelineHandle.handle == 0 || subobjects == nullptr || subobjectCount == 0)
+		return;
+
 	for (uint32_t i = 0; i < subobjectCount; ++i)
 	{
+		const uint32_t shaderHash = calculateShaderHashWithFallback(
+			subobjects[i].data,
+			pipelineHandle,
+			subobjects[i].type,
+			i);
+
 		switch (subobjects[i].type)
 		{
 		case pipeline_subobject_type::vertex_shader:
-			g_vertexShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			g_vertexShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 			break;
+
 		case pipeline_subobject_type::pixel_shader:
-			g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			g_pixelShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 			break;
+
 		case pipeline_subobject_type::compute_shader:
-			g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			g_computeShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 			break;
+
 		default:
 			break;
 		}
@@ -787,50 +850,76 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
-	if (nullptr != commandList && pipelineHandle.handle != 0)
+	if (nullptr == commandList || pipelineHandle.handle == 0)
 	{
-		const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
-		const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
-		const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
+		return;
+	}
 
-		if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
-		{
-			return;
-		}
+	const bool stageIncludesPixelShader = (stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader;
+	const bool stageIncludesVertexShader = (stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader;
+	const bool stageIncludesComputeShader = (stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader;
 
-		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	if (stageIncludesPixelShader && !g_pixelShaderManager.isKnownHandle(pipelineHandle.handle))
+	{
+		g_pixelShaderManager.addHashHandlePair(
+			calculateFallbackPipelineHash(pipelineHandle, stages, "PS"),
+			pipelineHandle.handle);
+	}
 
-		if (g_activeCollectorFrameCounter > 0)
-		{
-			if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-			if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-			if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		}
-		else
-		{
-			commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
-			commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
-			commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
-		}
+	if (stageIncludesVertexShader && !g_vertexShaderManager.isKnownHandle(pipelineHandle.handle))
+	{
+		g_vertexShaderManager.addHashHandlePair(
+			calculateFallbackPipelineHash(pipelineHandle, stages, "VS"),
+			pipelineHandle.handle);
+	}
 
-		if ((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader && handleHasPixelShaderAttached)
-		{
-			if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-			commandListData.activePixelShaderPipeline = pipelineHandle.handle;
-		}
-		if ((stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader && handleHasVertexShaderAttached)
-		{
-			if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-			commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
-		}
-		if ((stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader && handleHasComputeShaderAttached)
-		{
-			if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-			commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
-		}
+	if (stageIncludesComputeShader && !g_computeShaderManager.isKnownHandle(pipelineHandle.handle))
+	{
+		g_computeShaderManager.addHashHandlePair(
+			calculateFallbackPipelineHash(pipelineHandle, stages, "CS"),
+			pipelineHandle.handle);
+	}
+
+	const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
+	const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
+	const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
+
+	if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
+	{
+		return;
+	}
+
+	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+
+	if (g_activeCollectorFrameCounter > 0)
+	{
+		if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+	}
+	else
+	{
+		commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
+		commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
+		commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
+	}
+
+	if (stageIncludesPixelShader && handleHasPixelShaderAttached)
+	{
+		if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		commandListData.activePixelShaderPipeline = pipelineHandle.handle;
+	}
+	if (stageIncludesVertexShader && handleHasVertexShaderAttached)
+	{
+		if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
+	}
+	if (stageIncludesComputeShader && handleHasComputeShaderAttached)
+	{
+		if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
 	}
 }
-
 
 static uint64_t mixDrawFingerprintValue(uint64_t hash, uint64_t value)
 {

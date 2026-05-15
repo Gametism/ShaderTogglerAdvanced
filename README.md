@@ -18,10 +18,10 @@ This version adds:
 - auto-hide (timed) toggle groups
 - inverted auto-hide behavior
 - multiple timed trigger keys with configurable trigger modes
+- timed suppression keys for timed groups
 - a global hotkey modifier system for all defined hotkeys
 - improved shader detection behavior for DXVK and RenoDX (DX9)
 - sorting functions
-- **timed suppression keys for auto-hide / timed mode groups**
 
 ---
 
@@ -192,6 +192,7 @@ You can configure:
 - **Invert auto-hide behavior**
 - multiple trigger keys
 - trigger mode per trigger key
+- timed suppression keys
 
 ---
 
@@ -350,6 +351,155 @@ For a HUD hide group:
 
 ---
 
+## Timed suppression keys
+
+Timed suppression keys allow you to temporarily prevent a timed group from activating while specific buttons or keys are pressed.
+
+This feature is designed mainly for:
+- combat abilities
+- alternate attacks
+- contextual actions
+- special moves
+- situations where the normal timed trigger should temporarily be ignored
+
+Timed suppression only affects:
+- **Auto-hide mode / Timed mode groups**
+
+It does **not** affect:
+- normal toggle mode
+- hold mode
+
+---
+
+## Why this feature exists
+
+Some games reuse the same trigger button for:
+- normal gameplay actions
+- special abilities
+- contextual interactions
+
+Without suppression keys, this can create problems.
+
+### Example
+You use:
+- `RT` as the timed trigger to reveal a hidden HUD or disable a heavy visual effect
+
+But the game also uses:
+- `RT + Y`
+- `RT + B`
+- `RT + X`
+- `RT + A`
+
+for elemental abilities or special attacks.
+
+In that situation, the timed trigger would normally activate even during those abilities.
+
+That can cause:
+- important VFX to disappear
+- combat readability problems
+- unwanted HUD behavior
+- incorrect temporary shader blocking
+
+Timed suppression keys solve this.
+
+---
+
+## How timed suppression works
+
+When any suppression key is currently held:
+- timed activation is blocked
+- existing timed visibility is cancelled immediately
+- fade-out linger timers are reset
+- the group returns to its resting state
+
+The suppression keys only affect timed behavior.
+
+The group itself still exists normally and can still:
+- toggle manually
+- use hold mode
+- use startup behavior
+- use normal shader blocking
+
+---
+
+## Practical example: Crimson Desert
+
+### Goal
+Disable the heavy RT combat visual effect during normal attacks, but keep elemental skill effects visible.
+
+### Setup
+Timed trigger:
+- `RT`
+
+Suppression keys:
+- `A`
+- `B`
+- `X`
+- `Y`
+
+### Result
+- holding `RT` alone:
+  - heavy combat effect gets disabled
+
+- using:
+  - `RT + Y`
+  - `RT + B`
+  - `RT + X`
+  - `RT + A`
+
+  suppression activates and prevents the timed group from triggering.
+
+This allows:
+- elemental powers
+- skill effects
+- special attacks
+
+to remain fully visible.
+
+---
+
+## Additional use cases
+
+### Prevent HUD reveal during menus
+Suppress HUD auto-show while:
+- inventory button
+- map button
+- radial menu button
+
+is held.
+
+### Prevent effect removal during ultimate abilities
+Keep cinematic VFX active only during:
+- super attacks
+- finishers
+- special states
+
+### Context-sensitive UI behavior
+Prevent temporary shader blocking during:
+- lockpicking
+- dialogue wheels
+- interaction prompts
+- photo mode
+
+---
+
+## Important behavior notes
+
+Suppression keys:
+- are checked continuously
+- work instantly
+- override timed triggers
+- can use keyboard, mouse, or controller buttons
+
+If multiple suppression keys are defined:
+- pressing **any** of them activates suppression
+
+Timed suppression is evaluated before timed activation logic.
+
+That means suppression always has priority over timed triggers.
+
+---
+
 ## Timed mode options explained
 
 ### Hide delay / show time
@@ -501,6 +651,7 @@ The file is stored in the same folder as the add-on.
 - Controller button mapping support is available
 - Timed mode now supports inverted behavior for more intuitive HUD auto-show setups
 - Multiple timed trigger keys let one group react to keyboard, mouse, and controller input at the same time
+- Timed suppression keys allow contextual blocking of timed activation behavior
 - The global hotkey modifier lets users make all defined keyboard and mouse hotkeys safer without rebinding them individually
 
 ---

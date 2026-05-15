@@ -18,10 +18,10 @@ This version adds:
 - auto-hide (timed) toggle groups
 - inverted auto-hide behavior
 - multiple timed trigger keys with configurable trigger modes
-- timed suppression keys for timed groups
 - a global hotkey modifier system for all defined hotkeys
 - improved shader detection behavior for DXVK and RenoDX (DX9)
 - sorting functions
+- **timed suppression keys for timed groups**
 
 ---
 

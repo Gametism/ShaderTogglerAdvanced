@@ -169,6 +169,17 @@ static std::string toHex64(uint64_t value)
 	return std::string(buf);
 }
 
+static std::string toLowerCopy(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(),
+		[](unsigned char c)
+		{
+			return static_cast<char>(std::tolower(c));
+		});
+
+	return text;
+}
+
 static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
 {
 	const uint8_t keyCode = group.getToggleKey().getKeyCode();

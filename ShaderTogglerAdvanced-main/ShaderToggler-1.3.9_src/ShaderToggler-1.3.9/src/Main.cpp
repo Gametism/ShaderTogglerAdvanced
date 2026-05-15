@@ -35,11 +35,6 @@
 #include <cstring>
 #include <cstdio>
 #include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <cstdint>
-#include <climits>
-#include <cctype>
 
 #ifdef min
 #undef min
@@ -75,6 +70,8 @@ static std::vector<ToggleGroup> g_toggleGroups;
 static std::atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static std::atomic_int g_toggleGroupIdTimedTriggerKeyEditing = -1;
 static std::atomic_int g_toggleGroupTimedTriggerKeySlotEditing = -1;
+static std::atomic_int g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+static std::atomic_int g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 static std::atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
@@ -172,99 +169,6 @@ static std::string toHex64(uint64_t value)
 	return std::string(buf);
 }
 
-static std::string toLowerCopy(std::string text)
-{
-	std::transform(text.begin(), text.end(), text.begin(),
-		[](unsigned char c)
-		{
-			return static_cast<char>(std::tolower(c));
-		});
-
-	return text;
-}
-
-static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
-{
-	const uint8_t keyCode = group.getToggleKey().getKeyCode();
-
-	switch (keyCode)
-	{
-	case VK_END:      return 0;
-
-	case VK_DIVIDE:   return 10;
-	case VK_MULTIPLY: return 11;
-	case VK_SUBTRACT: return 12;
-	case VK_ADD:      return 13;
-
-	case VK_BACK:     return 20;
-	case VK_PRIOR:    return 21;
-	case VK_NEXT:     return 22;
-
-	case VK_UP:       return 30;
-	case VK_RIGHT:    return 31;
-	case VK_DOWN:     return 32;
-	case VK_LEFT:     return 33;
-
-	case VK_NUMPAD7:  return 40;
-	case VK_NUMPAD8:  return 41;
-	case VK_NUMPAD9:  return 42;
-	case VK_NUMPAD0:  return 43;
-	case VK_DECIMAL:  return 44;
-
-	case VK_INSERT:   return 50;
-	case VK_DELETE:   return 51;
-
-	default:
-		return 1000 + static_cast<int>(keyCode);
-	}
-}
-
-static void sortToggleGroupsByHotkey()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const int priorityA = getHotkeyLayoutSortPriority(a);
-			const int priorityB = getHotkeyLayoutSortPriority(b);
-
-			if (priorityA != priorityB)
-			{
-				return priorityA < priorityB;
-			}
-
-			const int keyA = a.getToggleKey().toInt();
-			const int keyB = b.getToggleKey().toInt();
-
-			if (keyA != keyB)
-			{
-				return keyA < keyB;
-			}
-
-			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
-		});
-
-	saveShaderTogglerIniFile();
-}
-
-static void sortToggleGroupsByNameAZ()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const std::string nameA = toLowerCopy(a.getName());
-			const std::string nameB = toLowerCopy(b.getName());
-
-			if (nameA != nameB)
-			{
-				return nameA < nameB;
-			}
-
-			return a.getId() < b.getId();
-		});
-
-	saveShaderTogglerIniFile();
-}
-
 static void sortToggleGroupsByNameLength()
 {
 	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
@@ -278,7 +182,7 @@ static void sortToggleGroupsByNameLength()
 				return lengthA < lengthB;
 			}
 
-			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
+			return a.getName() < b.getName();
 		});
 
 	saveShaderTogglerIniFile();
@@ -326,6 +230,20 @@ static bool isAnyTimedTriggerActive(const ToggleGroup& group, reshade::api::effe
 	}
 
 	return group.getToggleKey().isKeyPressed(runtime);
+}
+
+static bool isAnyTimedSuppressionKeyDown(const ToggleGroup& group, reshade::api::effect_runtime* runtime)
+{
+	if (!group.hasTimedSuppressionKeys())
+		return false;
+
+	for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
+	{
+		if (group.getTimedSuppressionKeyAt(i).isKeyDown(runtime))
+			return true;
+	}
+
+	return false;
 }
 
 static void setGroupActiveWithEditRefresh(ToggleGroup& group, bool newActive)
@@ -385,6 +303,12 @@ static std::string buildIniSignature()
 		{
 			data += "|TimedTriggerKey" + std::to_string(i) + "=" + std::to_string(group.getTimedTriggerKeyAt(i).toInt());
 			data += "|TimedTriggerMode" + std::to_string(i) + "=" + std::to_string(ToggleGroup::timedTriggerModeToInt(group.getTimedTriggerModeAt(i)));
+		}
+
+		data += "|TimedSuppressionCount=" + std::to_string(group.getTimedSuppressionKeyCount());
+		for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
+		{
+			data += "|TimedSuppressionKey" + std::to_string(i) + "=" + std::to_string(group.getTimedSuppressionKeyAt(i).toInt());
 		}
 
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
@@ -873,13 +797,24 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
-		const bool timedTriggerActiveNow = isAnyTimedTriggerActive(group, runtime);
+		const bool timedSuppressedNow = isAnyTimedSuppressionKeyDown(group, runtime);
+		const bool timedTriggerActiveNow = !timedSuppressedNow && isAnyTimedTriggerActive(group, runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
 
 		if (group.isTimedMode())
 		{
 			const bool timedTargetActiveState = !group.isTimedModeInverted();
 			const bool timedRestingActiveState = group.isTimedModeInverted();
+
+			if (timedSuppressedNow)
+			{
+				setGroupActiveWithEditRefresh(group, timedRestingActiveState);
+				g_groupLastTimedTriggerTime.erase(group.getId());
+				g_groupTimedVisibleSince.erase(group.getId());
+				g_groupTimedFadeOutStart.erase(group.getId());
+				g_groupHotkeyWasDown[group.getId()] = isDownNow;
+				continue;
+			}
 
 			if (timedTriggerActiveNow)
 			{
@@ -1171,6 +1106,12 @@ void startKeyBindingEditing(ToggleGroup& groupEditing)
 		g_toggleGroupTimedTriggerKeySlotEditing = -1;
 		g_keyCollector.clear();
 	}
+	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+		g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
 	g_toggleGroupIdKeyBindingEditing = groupEditing.getId();
 }
 
@@ -1213,8 +1154,61 @@ void startTimedTriggerKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex
 		g_toggleGroupIdKeyBindingEditing = -1;
 		g_keyCollector.clear();
 	}
+	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+		g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
 	g_toggleGroupIdTimedTriggerKeyEditing = groupEditing.getId();
 	g_toggleGroupTimedTriggerKeySlotEditing = slotIndex;
+}
+
+void endTimedSuppressionKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
+{
+	if (acceptCollectedBinding &&
+		g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
+		g_toggleGroupTimedSuppressionKeySlotEditing >= 0 &&
+		g_keyCollector.isValid())
+	{
+		groupEditing.setTimedSuppressionKeyAt(
+			static_cast<size_t>(g_toggleGroupTimedSuppressionKeySlotEditing),
+			g_keyCollector);
+	}
+
+	g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+	g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+	g_keyCollector.clear();
+}
+
+void startTimedSuppressionKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex)
+{
+	if (g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
+		g_toggleGroupTimedSuppressionKeySlotEditing == slotIndex)
+	{
+		return;
+	}
+
+	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		endTimedSuppressionKeyBindingEditing(false, groupEditing);
+	}
+
+	if (g_toggleGroupIdKeyBindingEditing >= 0)
+	{
+		g_toggleGroupIdKeyBindingEditing = -1;
+		g_keyCollector.clear();
+	}
+
+	if (g_toggleGroupIdTimedTriggerKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedTriggerKeyEditing = -1;
+		g_toggleGroupTimedTriggerKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
+
+	g_toggleGroupIdTimedSuppressionKeyEditing = groupEditing.getId();
+	g_toggleGroupTimedSuppressionKeySlotEditing = slotIndex;
 }
 
 void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
@@ -1270,7 +1264,9 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 {
 	applyModernUiStyle();
 
-	if (g_toggleGroupIdKeyBindingEditing >= 0 || g_toggleGroupIdTimedTriggerKeyEditing >= 0)
+	if (g_toggleGroupIdKeyBindingEditing >= 0 ||
+		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
+		g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
 	{
 		g_keyCollector.collectKeysPressed(runtime);
 	}
@@ -1371,7 +1367,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::Separator();
 
 		std::vector<int> idsToRemove;
-		int idToDuplicate = -1;
 
 		for (auto& group : g_toggleGroups)
 		{
@@ -1395,7 +1390,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			if (ImGui::Button("Duplicate"))
 			{
-				idToDuplicate = group.getId();
+				g_toggleGroups.push_back(group.makeDuplicate());
+				saveShaderTogglerIniFile();
 			}
 
 			ImGui::SameLine();
@@ -1438,6 +1434,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					ImGui::SameLine();
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.65f, 0.30f, 1.0f));
 					ImGui::Text(" Fade-out ");
+					ImGui::PopStyleColor();
+				}
+
+				if (group.hasTimedSuppressionKeys())
+				{
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.55f, 0.35f, 1.0f));
+					ImGui::Text(" Suppression ");
 					ImGui::PopStyleColor();
 				}
 			}
@@ -1634,6 +1638,113 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				}
 				ImGui::PopItemWidth();
 
+				ImGui::Text("Timed suppression keys");
+				ImGui::SameLine();
+				showHelpMarker("These keys prevent timed mode from activating while held. Useful for combo inputs like RT + Y / RT + B where the base trigger should be ignored.");
+
+				for (size_t suppressionIndex = 0; suppressionIndex < group.getTimedSuppressionKeyCount(); ++suppressionIndex)
+				{
+					ImGui::PushID(static_cast<int>(10000 + suppressionIndex));
+
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+
+					std::string suppressionTextBoxContents =
+						(g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+						 g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
+							? g_keyCollector.getKeyAsString()
+							: group.getTimedSuppressionKeyAsString(suppressionIndex);
+
+					char suppressionBuf[128] = {};
+					strncpy_s(suppressionBuf, sizeof(suppressionBuf), suppressionTextBoxContents.c_str(), _TRUNCATE);
+					ImGui::InputText("##TimedSuppression", suppressionBuf, sizeof(suppressionBuf), ImGuiInputTextFlags_ReadOnly);
+
+					if (ImGui::IsItemClicked())
+					{
+						startTimedSuppressionKeyBindingEditing(group, static_cast<int>(suppressionIndex));
+					}
+
+					if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+						g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
+					{
+						isKeyEditing = true;
+						ImGui::SameLine();
+						if (ImGui::Button("OK##TimedSuppression"))
+						{
+							endTimedSuppressionKeyBindingEditing(true, group);
+						}
+						ImGui::SameLine();
+						if (ImGui::Button("Cancel##TimedSuppression"))
+						{
+							endTimedSuppressionKeyBindingEditing(false, group);
+						}
+					}
+
+					ImGui::SameLine();
+					if (ImGui::Button("Remove##TimedSuppression"))
+					{
+						group.removeTimedSuppressionKeyAt(suppressionIndex);
+
+						if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId())
+						{
+							if (g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
+							{
+								g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+								g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+								g_keyCollector.clear();
+							}
+							else if (g_toggleGroupTimedSuppressionKeySlotEditing > static_cast<int>(suppressionIndex))
+							{
+								--g_toggleGroupTimedSuppressionKeySlotEditing;
+							}
+						}
+
+						ImGui::PopItemWidth();
+						ImGui::PopID();
+						break;
+					}
+
+					ImGui::PopItemWidth();
+					ImGui::PopID();
+				}
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+
+				std::string addSuppressionText =
+					(g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+					 g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(group.getTimedSuppressionKeyCount()))
+						? g_keyCollector.getKeyAsString()
+						: std::string("Add suppression key");
+
+				char addSuppressionBuf[128] = {};
+				strncpy_s(addSuppressionBuf, sizeof(addSuppressionBuf), addSuppressionText.c_str(), _TRUNCATE);
+				ImGui::InputText("##AddTimedSuppression", addSuppressionBuf, sizeof(addSuppressionBuf), ImGuiInputTextFlags_ReadOnly);
+
+				if (ImGui::IsItemClicked())
+				{
+					startTimedSuppressionKeyBindingEditing(group, static_cast<int>(group.getTimedSuppressionKeyCount()));
+				}
+
+				if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+					g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(group.getTimedSuppressionKeyCount()))
+				{
+					isKeyEditing = true;
+					ImGui::SameLine();
+					if (ImGui::Button("OK##AddTimedSuppression"))
+					{
+						endTimedSuppressionKeyBindingEditing(true, group);
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Cancel##AddTimedSuppression"))
+					{
+						endTimedSuppressionKeyBindingEditing(false, group);
+					}
+				}
+				ImGui::PopItemWidth();
+
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
@@ -1676,7 +1787,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setTimedMode(timedMode);
 				}
 				ImGui::SameLine();
-				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used.");
+				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used. Suppression keys can prevent this during combo inputs.");
 				ImGui::PopItemWidth();
 
 				if (group.isTimedMode())
@@ -1736,6 +1847,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						g_toggleGroupIdKeyBindingEditing = -1;
 						g_toggleGroupIdTimedTriggerKeyEditing = -1;
 						g_toggleGroupTimedTriggerKeySlotEditing = -1;
+						g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+						g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 						g_keyCollector.clear();
 						saveShaderTogglerIniFile();
 					}
@@ -1746,33 +1859,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::PopID();
 		}
 
-		if (idToDuplicate >= 0)
-		{
-			ToggleGroup duplicate("", ToggleGroup::getNewGroupId());
-			bool hasDuplicate = false;
-
-			for (const auto& group : g_toggleGroups)
-			{
-				if (group.getId() == idToDuplicate)
-				{
-					duplicate = group.makeDuplicate();
-					hasDuplicate = true;
-					break;
-				}
-			}
-
-			if (hasDuplicate)
-			{
-				g_toggleGroups.push_back(duplicate);
-				saveShaderTogglerIniFile();
-			}
-		}
-
 		if (!idsToRemove.empty())
 		{
 			g_toggleGroupIdKeyBindingEditing = -1;
 			g_toggleGroupIdTimedTriggerKeyEditing = -1;
 			g_toggleGroupTimedTriggerKeySlotEditing = -1;
+			g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+			g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 			g_keyCollector.clear();
 			g_toggleGroupIdShaderEditing = -1;
 			g_pixelShaderManager.stopHuntingMode();
@@ -1815,22 +1908,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::SameLine();
 		showHelpMarker("Manual ordering is preserved unless a sort button is used.");
 
-		if (ImGui::Button("Sort by hotkey layout"))
-		{
-			sortToggleGroupsByHotkey();
-		}
-		ImGui::SameLine();
-		showHelpMarker("Sorts groups in the Gametism layout order: End, Numpad / * - +, Backspace/Page keys, arrows, Numpad 7/8/9/0/Decimal, Insert/Delete.");
-
-		ImGui::SameLine();
-		if (ImGui::Button("Sort A-Z"))
-		{
-			sortToggleGroupsByNameAZ();
-		}
-		ImGui::SameLine();
-		showHelpMarker("Sorts groups alphabetically by name, ignoring letter case.");
-
-		ImGui::SameLine();
 		if (ImGui::Button("Sort by name length"))
 		{
 			sortToggleGroupsByNameLength();

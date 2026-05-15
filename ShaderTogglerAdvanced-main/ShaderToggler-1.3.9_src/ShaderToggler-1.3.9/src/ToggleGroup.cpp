@@ -415,6 +415,7 @@ namespace ShaderToggler
 			m_timedModeFadeOutMs = 150;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			m_timedTriggerKeys.clear();
+			m_timedSuppressionKeys.clear();
 			return;
 		}
 //GT
@@ -613,10 +614,8 @@ namespace ShaderToggler
 
 			for (const KeyData& key : m_timedSuppressionKeys)
 			{
-				if (!key.isValid())
-					continue;
-
-				timedSuppressionKeyValues.push_back(static_cast<uint32_t>(key.toInt()));
+				if (key.isValid())
+					timedSuppressionKeyValues.push_back(static_cast<uint32_t>(key.toInt()));
 			}
 
 			iniFile.SetArray("TimedSuppressionKeys", timedSuppressionKeyValues, "", sectionRoot);

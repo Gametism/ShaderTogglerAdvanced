@@ -2,17 +2,17 @@
 #include "CDataFile.h"
 #include <sstream>
 #include <vector>
-#include <cstdio>
-#include <climits>
-
+//GT
 namespace ShaderToggler
 {
 	namespace
 	{
+		//
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_A = "STA::TG::Gametism";
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_B = "STA::TG::SvenKoenigsmann";
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_C = "STA::TG::ShaderTogglerAdvanced";
 
+		//
 		static inline const char* preserve_togglegroup_provenance()
 		{
 			return STA_TOGGLEGROUP_UNIT_TAG_A;
@@ -123,7 +123,7 @@ namespace ShaderToggler
 
 		m_timedModeFadeOutMs = fadeOutMs;
 	}
-
+//GT
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
 		m_toggleKey.setKey(newKeyValue, shiftRequired, altRequired, ctrlRequired);
@@ -239,67 +239,6 @@ namespace ShaderToggler
 		return m_timedTriggerKeys;
 	}
 
-	void ToggleGroup::addTimedSuppressionKey(const KeyData& key)
-	{
-		if (!key.isValid())
-			return;
-
-		m_timedSuppressionKeys.push_back(key);
-	}
-
-	void ToggleGroup::setTimedSuppressionKeyAt(size_t index, const KeyData& key)
-	{
-		if (!key.isValid())
-			return;
-
-		if (index < m_timedSuppressionKeys.size())
-		{
-			m_timedSuppressionKeys[index] = key;
-		}
-		else if (index == m_timedSuppressionKeys.size())
-		{
-			addTimedSuppressionKey(key);
-		}
-	}
-
-	void ToggleGroup::removeTimedSuppressionKeyAt(size_t index)
-	{
-		if (index >= m_timedSuppressionKeys.size())
-			return;
-
-		m_timedSuppressionKeys.erase(m_timedSuppressionKeys.begin() + static_cast<std::ptrdiff_t>(index));
-	}
-
-	void ToggleGroup::clearTimedSuppressionKeys()
-	{
-		m_timedSuppressionKeys.clear();
-	}
-
-	bool ToggleGroup::hasTimedSuppressionKeys() const
-	{
-		return !m_timedSuppressionKeys.empty();
-	}
-
-	size_t ToggleGroup::getTimedSuppressionKeyCount() const
-	{
-		return m_timedSuppressionKeys.size();
-	}
-
-	const KeyData& ToggleGroup::getTimedSuppressionKeyAt(size_t index) const
-	{
-		return m_timedSuppressionKeys.at(index);
-	}
-
-	std::string ToggleGroup::getTimedSuppressionKeyAsString(size_t index) const
-	{
-		return m_timedSuppressionKeys.at(index).toString();
-	}
-
-	const std::vector<KeyData>& ToggleGroup::getTimedSuppressionKeys() const
-	{
-		return m_timedSuppressionKeys;
-	}
-
 	const char* ToggleGroup::timedTriggerModeToString(TimedTriggerMode mode)
 	{
 		switch (mode)
@@ -339,9 +278,8 @@ namespace ShaderToggler
 		m_pixelShaderHashes.clear();
 		m_vertexShaderHashes.clear();
 		m_computeShaderHashes.clear();
-		m_drawFingerprints.clear();
 	}
-
+//GT
 	void ToggleGroup::storeCollectedHashes(
 		const std::unordered_set<uint32_t>& pixel,
 		const std::unordered_set<uint32_t>& vertex,
@@ -356,26 +294,6 @@ namespace ShaderToggler
 	const std::unordered_set<uint32_t>& ToggleGroup::getVertexShaderHashes() const { return m_vertexShaderHashes; }
 	const std::unordered_set<uint32_t>& ToggleGroup::getComputeShaderHashes() const { return m_computeShaderHashes; }
 
-	void ToggleGroup::clearDrawFingerprints()
-	{
-		m_drawFingerprints.clear();
-	}
-
-	void ToggleGroup::storeCollectedDrawFingerprints(const std::unordered_set<uint64_t>& drawFingerprints)
-	{
-		m_drawFingerprints = drawFingerprints;
-	}
-
-	const std::unordered_set<uint64_t>& ToggleGroup::getDrawFingerprints() const
-	{
-		return m_drawFingerprints;
-	}
-
-	bool ToggleGroup::hasDrawFingerprints() const
-	{
-		return !m_drawFingerprints.empty();
-	}
-
 	ToggleGroup ToggleGroup::makeDuplicate() const
 	{
 		ToggleGroup copy(*this);
@@ -385,7 +303,7 @@ namespace ShaderToggler
 		copy.m_editing = false;
 		return copy;
 	}
-
+//GT
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
@@ -397,8 +315,6 @@ namespace ShaderToggler
 		m_timedModeMinVisibleMs = 250;
 		m_timedModeFadeOutMs = 150;
 		m_timedTriggerKeys.clear();
-		m_timedSuppressionKeys.clear();
-		m_drawFingerprints.clear();
 
 		if (index < 0)
 		{
@@ -437,10 +353,9 @@ namespace ShaderToggler
 			m_timedModeFadeOutMs = 150;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			m_timedTriggerKeys.clear();
-			m_timedSuppressionKeys.clear();
 			return;
 		}
-
+//GT
 		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
 		const std::string sectionRoot = prefix + std::to_string(index);
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
@@ -462,30 +377,13 @@ namespace ShaderToggler
 			if (hash != UINT_MAX)
 				m_pixelShaderHashes.insert(hash);
 		}
-
+//GT
 		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
 		for (int i = 0; i < amountShaders; i++)
 		{
 			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
 			if (hash != UINT_MAX)
 				m_computeShaderHashes.insert(hash);
-		}
-
-		const int amountDrawFingerprints = iniFile.GetInt("AmountDrawFingerprints", sectionRoot);
-		if (amountDrawFingerprints != INT_MIN)
-		{
-			for (int i = 0; i < amountDrawFingerprints; ++i)
-			{
-				const std::string value = iniFile.GetValue("DrawFingerprint" + std::to_string(i), sectionRoot);
-				if (!value.empty())
-				{
-					uint64_t parsed = 0;
-					if (sscanf_s(value.c_str(), "%llx", &parsed) == 1 && parsed != 0)
-					{
-						m_drawFingerprints.insert(parsed);
-					}
-				}
-			}
 		}
 
 		m_name = iniFile.GetValue("Name", sectionRoot);
@@ -525,14 +423,6 @@ namespace ShaderToggler
 				if (key.isValid())
 					addTimedTriggerKey(key, TimedTriggerMode::OnPress);
 			}
-		}
-
-		const std::vector<uint32_t> timedSuppressionKeyValues = iniFile.GetArray("TimedSuppressionKeys", sectionRoot);
-		for (const uint32_t keyValue : timedSuppressionKeyValues)
-		{
-			KeyData key = KeyData::fromInt(keyValue);
-			if (key.isValid())
-				addTimedSuppressionKey(key);
 		}
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
@@ -589,7 +479,7 @@ namespace ShaderToggler
 			m_holdInverted = false;
 		}
 	}
-
+//GT 
 	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
 	{
 		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
@@ -622,16 +512,6 @@ namespace ShaderToggler
 		}
 		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
 
-		counter = 0;
-		char drawFingerprintBuffer[17] = {};
-		for (const auto fingerprint : m_drawFingerprints)
-		{
-			snprintf(drawFingerprintBuffer, sizeof(drawFingerprintBuffer), "%016llX", static_cast<unsigned long long>(fingerprint));
-			iniFile.SetValue("DrawFingerprint" + std::to_string(counter), drawFingerprintBuffer, "", sectionRoot);
-			counter++;
-		}
-		iniFile.SetInt("AmountDrawFingerprints", counter, "", sectionRoot);
-
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 
@@ -656,20 +536,6 @@ namespace ShaderToggler
 			iniFile.SetArray("TimedTriggerModes", timedTriggerModeValues, "", sectionRoot);
 		}
 
-		if (!m_timedSuppressionKeys.empty())
-		{
-			std::vector<uint32_t> timedSuppressionKeyValues;
-			timedSuppressionKeyValues.reserve(m_timedSuppressionKeys.size());
-
-			for (const KeyData& key : m_timedSuppressionKeys)
-			{
-				if (key.isValid())
-					timedSuppressionKeyValues.push_back(static_cast<uint32_t>(key.toInt()));
-			}
-
-			iniFile.SetArray("TimedSuppressionKeys", timedSuppressionKeyValues, "", sectionRoot);
-		}
-
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
@@ -680,3 +546,4 @@ namespace ShaderToggler
 		iniFile.SetInt("TimedModeFadeOutMs", m_timedModeFadeOutMs, "", sectionRoot);
 	}
 }
+//GT

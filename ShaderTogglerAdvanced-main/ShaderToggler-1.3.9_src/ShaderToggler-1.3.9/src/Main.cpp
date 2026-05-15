@@ -84,12 +84,27 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
+struct DrawFingerprintInfo
+{
+	uint64_t fingerprint = 0;
+	uint32_t pixelHash = 0;
+	uint32_t vertexHash = 0;
+	uint32_t computeHash = 0;
+	uint32_t drawKind = 0;
+	uint32_t valueA = 0;
+	uint32_t valueB = 0;
+	uint32_t valueC = 0;
+	uint32_t valueD = 0;
+};
+
 static std::unordered_set<uint64_t> g_collectedDrawFingerprints;
 static std::vector<uint64_t> g_collectedDrawFingerprintsOrdered;
+static std::unordered_map<uint64_t, DrawFingerprintInfo> g_collectedDrawFingerprintInfo;
 static std::unordered_set<uint64_t> g_markedDrawFingerprints;
 static int g_activeHuntedDrawFingerprintIndex = -1;
 static uint64_t g_activeHuntedDrawFingerprint = 0;
 static bool g_drawFingerprintPreviewEnabled = true;
+static const int g_drawFingerprintNearbyWindow = 6;
 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
@@ -114,6 +129,7 @@ static bool s_prevNP9Down = false;
 static bool s_prevNP0Down = false;
 static bool s_prevNPDecimalDown = false;
 static bool s_prevNPAddDown = false;
+static bool s_prevNPSubtractDown = false;
 
 static const int s_holdRepeatStartMs = 200;
 static const int s_holdRepeatMidMs = 120;
@@ -841,7 +857,7 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 					g_activeHuntedDrawFingerprintIndex,
 					static_cast<int>(g_collectedDrawFingerprintsOrdered.size()),
 					static_cast<int>(g_markedDrawFingerprints.size()));
-				ImGui::TextUnformatted("Draw HUD hunt: Numpad 0 / Decimal = previous / next fingerprint, Numpad + = mark.");
+				ImGui::TextUnformatted("Draw HUD hunt: Numpad 0 / Decimal = previous / next, Numpad + = mark, Numpad - = mark nearby/same-shader.");
 			}
 		}
 		ImGui::End();
@@ -946,6 +962,7 @@ static void clearDrawFingerprintHuntingState()
 {
 	g_collectedDrawFingerprints.clear();
 	g_collectedDrawFingerprintsOrdered.clear();
+	g_collectedDrawFingerprintInfo.clear();
 	g_markedDrawFingerprints.clear();
 	g_activeHuntedDrawFingerprintIndex = -1;
 	g_activeHuntedDrawFingerprint = 0;
@@ -988,6 +1005,48 @@ static void toggleMarkOnActiveDrawFingerprint()
 		g_markedDrawFingerprints.insert(g_activeHuntedDrawFingerprint);
 }
 
+static bool drawFingerprintHasSameShaderSet(const DrawFingerprintInfo& a, const DrawFingerprintInfo& b)
+{
+	return a.pixelHash == b.pixelHash &&
+		a.vertexHash == b.vertexHash &&
+		a.computeHash == b.computeHash;
+}
+
+static void markNearbyDrawFingerprintsForActiveShaderSet()
+{
+	if (g_activeHuntedDrawFingerprint == 0 ||
+		g_activeHuntedDrawFingerprintIndex < 0 ||
+		g_activeHuntedDrawFingerprintIndex >= static_cast<int>(g_collectedDrawFingerprintsOrdered.size()))
+	{
+		return;
+	}
+
+	const auto activeInfoIt = g_collectedDrawFingerprintInfo.find(g_activeHuntedDrawFingerprint);
+	if (activeInfoIt == g_collectedDrawFingerprintInfo.end())
+	{
+		g_markedDrawFingerprints.insert(g_activeHuntedDrawFingerprint);
+		return;
+	}
+
+	const DrawFingerprintInfo activeInfo = activeInfoIt->second;
+	const int startIndex = std::max(0, g_activeHuntedDrawFingerprintIndex - g_drawFingerprintNearbyWindow);
+	const int endIndex = std::min(static_cast<int>(g_collectedDrawFingerprintsOrdered.size()) - 1,
+		g_activeHuntedDrawFingerprintIndex + g_drawFingerprintNearbyWindow);
+
+	for (int i = startIndex; i <= endIndex; ++i)
+	{
+		const uint64_t candidateFingerprint = g_collectedDrawFingerprintsOrdered[static_cast<size_t>(i)];
+		const auto candidateInfoIt = g_collectedDrawFingerprintInfo.find(candidateFingerprint);
+		if (candidateInfoIt == g_collectedDrawFingerprintInfo.end())
+			continue;
+
+		if (drawFingerprintHasSameShaderSet(activeInfo, candidateInfoIt->second))
+		{
+			g_markedDrawFingerprints.insert(candidateFingerprint);
+		}
+	}
+}
+
 static bool groupContainsShaderHash(const ToggleGroup& group, uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
 {
 	return group.getPixelShaderHashes().count(pixelHash) == 1 ||
@@ -1015,6 +1074,18 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 		if (g_collectedDrawFingerprints.insert(drawFingerprint).second)
 		{
 			g_collectedDrawFingerprintsOrdered.push_back(drawFingerprint);
+
+			DrawFingerprintInfo info;
+			info.fingerprint = drawFingerprint;
+			info.pixelHash = pixelHash;
+			info.vertexHash = vertexHash;
+			info.computeHash = computeHash;
+			info.drawKind = drawKind;
+			info.valueA = valueA;
+			info.valueB = valueB;
+			info.valueC = valueC;
+			info.valueD = valueD;
+			g_collectedDrawFingerprintInfo[drawFingerprint] = info;
 		}
 	}
 
@@ -1024,8 +1095,8 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 
 	if (g_drawFingerprintPreviewEnabled &&
 		g_toggleGroupIdShaderEditing >= 0 &&
-		g_activeHuntedDrawFingerprint != 0 &&
-		drawFingerprint == g_activeHuntedDrawFingerprint)
+		((g_activeHuntedDrawFingerprint != 0 && drawFingerprint == g_activeHuntedDrawFingerprint) ||
+		 g_markedDrawFingerprints.count(drawFingerprint) == 1))
 	{
 		blockCall = true;
 	}
@@ -1398,6 +1469,14 @@ static void onReshadePresent(effect_runtime* runtime)
 			toggleMarkOnActiveDrawFingerprint();
 		}
 		s_prevNPAddDown = npAddDown;
+
+		bool npSubtractDown = is_key_down_numpad_only(runtime, VK_SUBTRACT);
+		bool npSubtractPressed = npSubtractDown && !s_prevNPSubtractDown;
+		if (npSubtractPressed)
+		{
+			markNearbyDrawFingerprintsForActiveShaderSet();
+		}
+		s_prevNPSubtractDown = npSubtractDown;
 	}
 }
 
@@ -1615,6 +1694,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::TextUnformatted("* Hold 1 / 2 / 4 / 5 / 7 / 8 to scroll faster");
 		ImGui::TextUnformatted("* Draw HUD hunt: Numpad 0 / Decimal = previous / next draw fingerprint");
 		ImGui::TextUnformatted("* Draw HUD hunt: Numpad + = mark / unmark draw fingerprint");
+		ImGui::TextUnformatted("* Draw HUD hunt: Numpad - = add nearby fingerprints with the same shader combination");
 		ImGui::PopTextWrapPos();
 	}
 

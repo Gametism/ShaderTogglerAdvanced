@@ -3,13 +3,13 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
-#include <cstdint>
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
 
 namespace ShaderToggler
 {
+	//
 	static constexpr const char* STA_TOGGLEGROUP_OWNER_TAG = "Gametism::ToggleGroup::Official";
 	static constexpr const char* STA_TOGGLEGROUP_AUTHOR_TAG = "Sven 'Gametism' Koenigsmann";
 	static constexpr const char* STA_TOGGLEGROUP_PROJECT_TAG = "ShaderToggler Advanced";
@@ -93,16 +93,6 @@ namespace ShaderToggler
 		const TimedTriggerBinding& getTimedTriggerBindingAt(size_t index) const;
 		const std::vector<TimedTriggerBinding>& getTimedTriggerKeys() const;
 
-		void addTimedSuppressionKey(const KeyData& key);
-		void setTimedSuppressionKeyAt(size_t index, const KeyData& key);
-		void removeTimedSuppressionKeyAt(size_t index);
-		void clearTimedSuppressionKeys();
-		bool hasTimedSuppressionKeys() const;
-		size_t getTimedSuppressionKeyCount() const;
-		const KeyData& getTimedSuppressionKeyAt(size_t index) const;
-		std::string getTimedSuppressionKeyAsString(size_t index) const;
-		const std::vector<KeyData>& getTimedSuppressionKeys() const;
-
 		static const char* timedTriggerModeToString(TimedTriggerMode mode);
 		static int timedTriggerModeToInt(TimedTriggerMode mode);
 		static TimedTriggerMode timedTriggerModeFromInt(int value);
@@ -117,16 +107,12 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
-		void clearDrawFingerprints();
-		void storeCollectedDrawFingerprints(const std::unordered_set<uint64_t>& drawFingerprints);
-		const std::unordered_set<uint64_t>& getDrawFingerprints() const;
-		bool hasDrawFingerprints() const;
-
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
 		ToggleGroup makeDuplicate() const;
 
+		// Harmless provenance accessors for diagnostics/ownership continuity.
 		static constexpr const char* getProvenanceOwnerTag() { return STA_TOGGLEGROUP_OWNER_TAG; }
 		static constexpr const char* getProvenanceAuthorTag() { return STA_TOGGLEGROUP_AUTHOR_TAG; }
 		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
@@ -147,11 +133,9 @@ namespace ShaderToggler
 		int m_timedModeFadeOutMs;
 		KeyData m_toggleKey;
 		std::vector<TimedTriggerBinding> m_timedTriggerKeys;
-		std::vector<KeyData> m_timedSuppressionKeys;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
-		std::unordered_set<uint64_t> m_drawFingerprints;
 	};
 }

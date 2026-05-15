@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <cstdint>
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
@@ -93,6 +94,16 @@ namespace ShaderToggler
 		const TimedTriggerBinding& getTimedTriggerBindingAt(size_t index) const;
 		const std::vector<TimedTriggerBinding>& getTimedTriggerKeys() const;
 
+		void addTimedSuppressionKey(const KeyData& key);
+		void setTimedSuppressionKeyAt(size_t index, const KeyData& key);
+		void removeTimedSuppressionKeyAt(size_t index);
+		void clearTimedSuppressionKeys();
+		bool hasTimedSuppressionKeys() const;
+		size_t getTimedSuppressionKeyCount() const;
+		const KeyData& getTimedSuppressionKeyAt(size_t index) const;
+		std::string getTimedSuppressionKeyAsString(size_t index) const;
+		const std::vector<KeyData>& getTimedSuppressionKeys() const;
+
 		static const char* timedTriggerModeToString(TimedTriggerMode mode);
 		static int timedTriggerModeToInt(TimedTriggerMode mode);
 		static TimedTriggerMode timedTriggerModeFromInt(int value);
@@ -106,6 +117,11 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getPixelShaderHashes() const;
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
+
+		void clearDrawFingerprints();
+		void storeCollectedDrawFingerprints(const std::unordered_set<uint64_t>& drawFingerprints);
+		const std::unordered_set<uint64_t>& getDrawFingerprints() const;
+		bool hasDrawFingerprints() const;
 
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
@@ -133,9 +149,11 @@ namespace ShaderToggler
 		int m_timedModeFadeOutMs;
 		KeyData m_toggleKey;
 		std::vector<TimedTriggerBinding> m_timedTriggerKeys;
+		std::vector<KeyData> m_timedSuppressionKeys;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
+		std::unordered_set<uint64_t> m_drawFingerprints;
 	};
 }

@@ -41,6 +41,7 @@
 #include <cstdint>
 #include <climits>
 #include <cctype>
+#include <mutex>
 
 #ifdef min
 #undef min
@@ -105,6 +106,14 @@ static int g_activeHuntedDrawFingerprintIndex = -1;
 static uint64_t g_activeHuntedDrawFingerprint = 0;
 static bool g_drawFingerprintPreviewEnabled = true;
 static const int g_drawFingerprintNearbyWindow = 6;
+
+// Compatibility guard for modern D3D12 games:
+// Keep the heavier HUD fingerprint system dormant during startup and whenever
+// it is not actually needed. Normal shader hunting/toggling remains active.
+static std::mutex g_drawFingerprintMutex;
+static std::atomic_uint32_t g_presentFrameCounter = 0;
+static std::atomic_bool g_drawFingerprintHuntActive = false;
+static const uint32_t g_drawFingerprintWarmupPresentFrames = 8;
 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
@@ -973,6 +982,7 @@ static uint64_t buildDrawFingerprint(uint32_t pixelHash, uint32_t vertexHash, ui
 
 static void clearDrawFingerprintHuntingState()
 {
+	std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
 	g_collectedDrawFingerprints.clear();
 	g_collectedDrawFingerprintsOrdered.clear();
 	g_collectedDrawFingerprintInfo.clear();
@@ -983,6 +993,7 @@ static void clearDrawFingerprintHuntingState()
 
 static void selectNextDrawFingerprint()
 {
+	std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
 	if (g_collectedDrawFingerprintsOrdered.empty())
 		return;
 
@@ -996,6 +1007,7 @@ static void selectNextDrawFingerprint()
 
 static void selectPreviousDrawFingerprint()
 {
+	std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
 	if (g_collectedDrawFingerprintsOrdered.empty())
 		return;
 
@@ -1009,6 +1021,7 @@ static void selectPreviousDrawFingerprint()
 
 static void toggleMarkOnActiveDrawFingerprint()
 {
+	std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
 	if (g_activeHuntedDrawFingerprint == 0)
 		return;
 
@@ -1027,6 +1040,7 @@ static bool drawFingerprintHasSameShaderSet(const DrawFingerprintInfo& a, const 
 
 static void markNearbyDrawFingerprintsForActiveShaderSet()
 {
+	std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
 	if (g_activeHuntedDrawFingerprint == 0 ||
 		g_activeHuntedDrawFingerprintIndex < 0 ||
 		g_activeHuntedDrawFingerprintIndex >= static_cast<int>(g_collectedDrawFingerprintsOrdered.size()))
@@ -1060,6 +1074,22 @@ static void markNearbyDrawFingerprintsForActiveShaderSet()
 	}
 }
 
+static bool hasStablePresentForDrawFingerprints()
+{
+	return g_presentFrameCounter.load() >= g_drawFingerprintWarmupPresentFrames;
+}
+
+static bool hasAnyActiveGroupDrawFingerprints()
+{
+	for (const auto& group : g_toggleGroups)
+	{
+		if (group.isActive() && group.hasDrawFingerprints())
+			return true;
+	}
+
+	return false;
+}
+
 static bool groupContainsShaderHash(const ToggleGroup& group, uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
 {
 	return group.getPixelShaderHashes().count(pixelHash) == 1 ||
@@ -1080,10 +1110,29 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 	const uint32_t pixelHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
 	const uint32_t vertexHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
 	const uint32_t computeHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
-	const uint64_t drawFingerprint = buildDrawFingerprint(pixelHash, vertexHash, computeHash, drawKind, valueA, valueB, valueC, valueD);
 
-	if (g_toggleGroupIdShaderEditing >= 0 && g_activeCollectorFrameCounter > 0 && drawFingerprint != 0)
+	bool blockCall = g_pixelShaderManager.isBlockedShader(pixelHash) ||
+		g_vertexShaderManager.isBlockedShader(vertexHash) ||
+		g_computeShaderManager.isBlockedShader(computeHash);
+
+	const bool editingDrawFingerprints =
+		g_drawFingerprintHuntActive.load() &&
+		g_toggleGroupIdShaderEditing >= 0 &&
+		hasStablePresentForDrawFingerprints();
+
+	const bool canUseDrawFingerprints =
+		hasStablePresentForDrawFingerprints() &&
+		(editingDrawFingerprints || hasAnyActiveGroupDrawFingerprints());
+
+	uint64_t drawFingerprint = 0;
+	if (canUseDrawFingerprints)
 	{
+		drawFingerprint = buildDrawFingerprint(pixelHash, vertexHash, computeHash, drawKind, valueA, valueB, valueC, valueD);
+	}
+
+	if (editingDrawFingerprints && g_activeCollectorFrameCounter > 0 && drawFingerprint != 0)
+	{
+		std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
 		if (g_collectedDrawFingerprints.insert(drawFingerprint).second)
 		{
 			g_collectedDrawFingerprintsOrdered.push_back(drawFingerprint);
@@ -1102,16 +1151,14 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 		}
 	}
 
-	bool blockCall = g_pixelShaderManager.isBlockedShader(pixelHash) ||
-		g_vertexShaderManager.isBlockedShader(vertexHash) ||
-		g_computeShaderManager.isBlockedShader(computeHash);
-
-	if (g_drawFingerprintPreviewEnabled &&
-		g_toggleGroupIdShaderEditing >= 0 &&
-		((g_activeHuntedDrawFingerprint != 0 && drawFingerprint == g_activeHuntedDrawFingerprint) ||
-		 g_markedDrawFingerprints.count(drawFingerprint) == 1))
+	if (editingDrawFingerprints && g_drawFingerprintPreviewEnabled && drawFingerprint != 0)
 	{
-		blockCall = true;
+		std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
+		if ((g_activeHuntedDrawFingerprint != 0 && drawFingerprint == g_activeHuntedDrawFingerprint) ||
+			g_markedDrawFingerprints.count(drawFingerprint) == 1)
+		{
+			blockCall = true;
+		}
 	}
 
 	for (auto& group : g_toggleGroups)
@@ -1119,11 +1166,7 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 		if (!group.isActive())
 			continue;
 
-		// Draw fingerprints are an additional narrow filter, not a replacement for
-		// normal shader-hash blocking. This allows one group to contain both:
-		// - regular marked pixel/vertex/compute shaders
-		// - specific HUD draw fingerprints
-		if (group.hasDrawFingerprints() &&
+		if (drawFingerprint != 0 && group.hasDrawFingerprints() &&
 			group.getDrawFingerprints().count(drawFingerprint) == 1)
 		{
 			blockCall = true;
@@ -1139,7 +1182,6 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 
 	return blockCall;
 }
-
 
 static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
@@ -1167,6 +1209,12 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
+	const uint32_t presentCount = g_presentFrameCounter.load();
+	if (presentCount < UINT32_MAX)
+	{
+		++g_presentFrameCounter;
+	}
+
 	if (g_activeCollectorFrameCounter > 0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -1662,6 +1710,8 @@ void startTimedSuppressionKeyBindingEditing(ToggleGroup& groupEditing, int slotI
 
 void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
 {
+	g_drawFingerprintHuntActive = false;
+
 	if (acceptCollectedShaderHashes && g_toggleGroupIdShaderEditing == groupEditing.getId())
 	{
 		groupEditing.storeCollectedHashes(
@@ -1669,7 +1719,10 @@ void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditin
 			g_vertexShaderManager.getMarkedShaderHashes(),
 			g_computeShaderManager.getMarkedShaderHashes());
 
-		groupEditing.storeCollectedDrawFingerprints(g_markedDrawFingerprints);
+		{
+			std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
+			groupEditing.storeCollectedDrawFingerprints(g_markedDrawFingerprints);
+		}
 
 		g_pixelShaderManager.stopHuntingMode();
 		g_vertexShaderManager.stopHuntingMode();
@@ -1696,7 +1749,11 @@ void startShaderEditing(ToggleGroup& groupEditing)
 	g_computeShaderManager.startHuntingMode(groupEditing.getComputeShaderHashes());
 
 	clearDrawFingerprintHuntingState();
-	g_markedDrawFingerprints = groupEditing.getDrawFingerprints();
+	{
+		std::lock_guard<std::mutex> lock(g_drawFingerprintMutex);
+		g_markedDrawFingerprints = groupEditing.getDrawFingerprints();
+	}
+	g_drawFingerprintHuntActive = true;
 
 	groupEditing.clearHashes();
 }

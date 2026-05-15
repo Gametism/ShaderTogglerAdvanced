@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <cstdint>
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
@@ -116,6 +117,11 @@ namespace ShaderToggler
 		const std::unordered_set<uint32_t>& getVertexShaderHashes() const;
 		const std::unordered_set<uint32_t>& getComputeShaderHashes() const;
 
+		void clearDrawFingerprints();
+		void storeCollectedDrawFingerprints(const std::unordered_set<uint64_t>& drawFingerprints);
+		const std::unordered_set<uint64_t>& getDrawFingerprints() const;
+		bool hasDrawFingerprints() const;
+
 		void loadState(class CDataFile& iniFile, int index, bool usingCustomFormat);
 		void saveState(class CDataFile& iniFile, int index, bool usingCustomFormat) const;
 
@@ -146,5 +152,6 @@ namespace ShaderToggler
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
+		std::unordered_set<uint64_t> m_drawFingerprints;
 	};
 }

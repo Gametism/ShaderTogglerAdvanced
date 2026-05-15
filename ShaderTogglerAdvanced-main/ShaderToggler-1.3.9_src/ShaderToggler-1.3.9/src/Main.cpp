@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
+#include <unordered_set>
 #include <utility>
 #include <cstdint>
 #include <climits>
@@ -61,6 +62,7 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	uint64_t activePixelShaderPipeline;
 	uint64_t activeVertexShaderPipeline;
 	uint64_t activeComputeShaderPipeline;
+	uint64_t drawCallCounter;
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
@@ -82,6 +84,13 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
+static std::unordered_set<uint64_t> g_collectedDrawFingerprints;
+static std::vector<uint64_t> g_collectedDrawFingerprintsOrdered;
+static std::unordered_set<uint64_t> g_markedDrawFingerprints;
+static int g_activeHuntedDrawFingerprintIndex = -1;
+static uint64_t g_activeHuntedDrawFingerprint = 0;
+static bool g_drawFingerprintPreviewEnabled = true;
+
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
@@ -102,6 +111,9 @@ static bool s_prevNP6Down = false;
 static bool s_prevNP7Down = false;
 static bool s_prevNP8Down = false;
 static bool s_prevNP9Down = false;
+static bool s_prevNP0Down = false;
+static bool s_prevNPDecimalDown = false;
+static bool s_prevNPAddDown = false;
 
 static const int s_holdRepeatStartMs = 200;
 static const int s_holdRepeatMidMs = 120;
@@ -405,6 +417,14 @@ static std::string buildIniSignature()
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
 		appendSortedHashesToSignature(data, "V", group.getVertexShaderHashes());
 		appendSortedHashesToSignature(data, "C", group.getComputeShaderHashes());
+
+		std::vector<uint64_t> sortedDrawFingerprints(group.getDrawFingerprints().begin(), group.getDrawFingerprints().end());
+		std::sort(sortedDrawFingerprints.begin(), sortedDrawFingerprints.end());
+		for (const auto value : sortedDrawFingerprints)
+		{
+			data += "|D=";
+			data += toHex64(value);
+		}
 	}
 
 	return toHex64(fnv1a64(data));
@@ -465,57 +485,6 @@ static uint32_t calculateShaderHash(void* shaderData)
 	const auto shaderDesc = *static_cast<shader_desc *>(shaderData);
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
-
-static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_stage stages, const char* shaderTypeTag)
-{
-	std::string data;
-	data += "STA_BIND_FALLBACK_SHADER|";
-	data += shaderTypeTag;
-	data += "|";
-	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
-	data += "|";
-	data += std::to_string(static_cast<unsigned long long>(static_cast<uint32_t>(stages)));
-
-	const uint64_t hash64 = fnv1a64(data);
-	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
-
-	if (hash32 == 0)
-		hash32 = 1;
-
-	return hash32;
-}
-
-
-
-static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
-{
-	std::string data;
-	data += "STA_FALLBACK_SHADER|";
-	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
-	data += "|";
-	data += std::to_string(static_cast<int>(type));
-	data += "|";
-	data += std::to_string(subobjectIndex);
-
-	const uint64_t hash64 = fnv1a64(data);
-	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
-
-	if (hash32 == 0)
-		hash32 = 1;
-
-	return hash32;
-}
-
-static uint32_t calculateShaderHashWithFallback(void* shaderData, pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
-{
-	const uint32_t realHash = calculateShaderHash(shaderData);
-
-	if (realHash != 0)
-		return realHash;
-
-	return calculateFallbackPipelineHash(pipelineHandle, type, subobjectIndex);
-}
-
 
 static void applyModernUiStyle()
 {
@@ -696,35 +665,24 @@ static void onResetCommandList(command_list *commandList)
 	commandListData.activePixelShaderPipeline = static_cast<uint64_t>(-1);
 	commandListData.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
 	commandListData.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
+	commandListData.drawCallCounter = 0;
 }
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
-	if (pipelineHandle.handle == 0 || subobjects == nullptr || subobjectCount == 0)
-		return;
-
 	for (uint32_t i = 0; i < subobjectCount; ++i)
 	{
-		const uint32_t shaderHash = calculateShaderHashWithFallback(
-			subobjects[i].data,
-			pipelineHandle,
-			subobjects[i].type,
-			i);
-
 		switch (subobjects[i].type)
 		{
 		case pipeline_subobject_type::vertex_shader:
-			g_vertexShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+			g_vertexShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
 			break;
-
 		case pipeline_subobject_type::pixel_shader:
-			g_pixelShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+			g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
 			break;
-
 		case pipeline_subobject_type::compute_shader:
-			g_computeShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
+			g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
 			break;
-
 		default:
 			break;
 		}
@@ -812,6 +770,16 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
 			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
 			displayShaderManagerInfo(g_computeShaderManager, "compute");
+
+			if (!g_collectedDrawFingerprintsOrdered.empty())
+			{
+				ImGui::Text("Draw fingerprints: %d. Current: %d / %d. Marked: %d.",
+					static_cast<int>(g_collectedDrawFingerprintsOrdered.size()),
+					g_activeHuntedDrawFingerprintIndex,
+					static_cast<int>(g_collectedDrawFingerprintsOrdered.size()),
+					static_cast<int>(g_markedDrawFingerprints.size()));
+				ImGui::TextUnformatted("Draw HUD hunt: Numpad 0 / Decimal = previous / next fingerprint, Numpad + = mark.");
+			}
 		}
 		ImGui::End();
 	}
@@ -819,139 +787,195 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
-	if (nullptr == commandList || pipelineHandle.handle == 0)
+	if (nullptr != commandList && pipelineHandle.handle != 0)
 	{
-		return;
-	}
+		const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
+		const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
+		const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
 
-	const bool stageIncludesPixelShader = (stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader;
-	const bool stageIncludesVertexShader = (stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader;
-	const bool stageIncludesComputeShader = (stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader;
+		if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
+		{
+			return;
+		}
 
-	if (stageIncludesPixelShader && !g_pixelShaderManager.isKnownHandle(pipelineHandle.handle))
-	{
-		g_pixelShaderManager.addHashHandlePair(
-			calculateFallbackPipelineHash(pipelineHandle, stages, "PS"),
-			pipelineHandle.handle);
-	}
+		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
-	if (stageIncludesVertexShader && !g_vertexShaderManager.isKnownHandle(pipelineHandle.handle))
-	{
-		g_vertexShaderManager.addHashHandlePair(
-			calculateFallbackPipelineHash(pipelineHandle, stages, "VS"),
-			pipelineHandle.handle);
-	}
+		if (g_activeCollectorFrameCounter > 0)
+		{
+			if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+		}
+		else
+		{
+			commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
+			commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
+			commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
+		}
 
-	if (stageIncludesComputeShader && !g_computeShaderManager.isKnownHandle(pipelineHandle.handle))
-	{
-		g_computeShaderManager.addHashHandlePair(
-			calculateFallbackPipelineHash(pipelineHandle, stages, "CS"),
-			pipelineHandle.handle);
-	}
-
-	const bool handleHasPixelShaderAttached = g_pixelShaderManager.isKnownHandle(pipelineHandle.handle);
-	const bool handleHasVertexShaderAttached = g_vertexShaderManager.isKnownHandle(pipelineHandle.handle);
-	const bool handleHasComputeShaderAttached = g_computeShaderManager.isKnownHandle(pipelineHandle.handle);
-
-	if (!handleHasPixelShaderAttached && !handleHasVertexShaderAttached && !handleHasComputeShaderAttached)
-	{
-		return;
-	}
-
-	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
-
-	if (g_activeCollectorFrameCounter > 0)
-	{
-		if (handleHasPixelShaderAttached) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		if (handleHasVertexShaderAttached) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		if (handleHasComputeShaderAttached) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-	}
-	else
-	{
-		commandListData.activePixelShaderPipeline = handleHasPixelShaderAttached ? pipelineHandle.handle : commandListData.activePixelShaderPipeline;
-		commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
-		commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
-	}
-
-	if (stageIncludesPixelShader && handleHasPixelShaderAttached)
-	{
-		if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		commandListData.activePixelShaderPipeline = pipelineHandle.handle;
-	}
-	if (stageIncludesVertexShader && handleHasVertexShaderAttached)
-	{
-		if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
-	}
-	if (stageIncludesComputeShader && handleHasComputeShaderAttached)
-	{
-		if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
-		commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
+		if ((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader && handleHasPixelShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_pixelShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activePixelShaderPipeline = pipelineHandle.handle;
+		}
+		if ((stages & pipeline_stage::vertex_shader) == pipeline_stage::vertex_shader && handleHasVertexShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_vertexShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activeVertexShaderPipeline = pipelineHandle.handle;
+		}
+		if ((stages & pipeline_stage::compute_shader) == pipeline_stage::compute_shader && handleHasComputeShaderAttached)
+		{
+			if (g_activeCollectorFrameCounter > 0) g_computeShaderManager.addActivePipelineHandle(pipelineHandle.handle);
+			commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
+		}
 	}
 }
 
-bool blockDrawCallForCommandList(command_list* commandList)
+
+static uint64_t mixDrawFingerprintValue(uint64_t hash, uint64_t value)
+{
+	hash ^= value + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2);
+	return hash;
+}
+
+static uint64_t buildDrawFingerprint(uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash,
+	uint32_t drawKind, uint32_t valueA, uint32_t valueB, uint32_t valueC, uint32_t valueD)
+{
+	uint64_t hash = 14695981039346656037ull;
+	hash = mixDrawFingerprintValue(hash, pixelHash);
+	hash = mixDrawFingerprintValue(hash, vertexHash);
+	hash = mixDrawFingerprintValue(hash, computeHash);
+	hash = mixDrawFingerprintValue(hash, drawKind);
+	hash = mixDrawFingerprintValue(hash, valueA);
+	hash = mixDrawFingerprintValue(hash, valueB);
+	hash = mixDrawFingerprintValue(hash, valueC);
+	hash = mixDrawFingerprintValue(hash, valueD);
+	return hash;
+}
+
+static void clearDrawFingerprintHuntingState()
+{
+	g_collectedDrawFingerprints.clear();
+	g_collectedDrawFingerprintsOrdered.clear();
+	g_markedDrawFingerprints.clear();
+	g_activeHuntedDrawFingerprintIndex = -1;
+	g_activeHuntedDrawFingerprint = 0;
+}
+
+static void selectNextDrawFingerprint()
+{
+	if (g_collectedDrawFingerprintsOrdered.empty())
+		return;
+
+	if (g_activeHuntedDrawFingerprintIndex < static_cast<int>(g_collectedDrawFingerprintsOrdered.size()) - 1)
+		++g_activeHuntedDrawFingerprintIndex;
+	else
+		g_activeHuntedDrawFingerprintIndex = 0;
+
+	g_activeHuntedDrawFingerprint = g_collectedDrawFingerprintsOrdered[static_cast<size_t>(g_activeHuntedDrawFingerprintIndex)];
+}
+
+static void selectPreviousDrawFingerprint()
+{
+	if (g_collectedDrawFingerprintsOrdered.empty())
+		return;
+
+	if (g_activeHuntedDrawFingerprintIndex <= 0)
+		g_activeHuntedDrawFingerprintIndex = static_cast<int>(g_collectedDrawFingerprintsOrdered.size()) - 1;
+	else
+		--g_activeHuntedDrawFingerprintIndex;
+
+	g_activeHuntedDrawFingerprint = g_collectedDrawFingerprintsOrdered[static_cast<size_t>(g_activeHuntedDrawFingerprintIndex)];
+}
+
+static void toggleMarkOnActiveDrawFingerprint()
+{
+	if (g_activeHuntedDrawFingerprint == 0)
+		return;
+
+	if (g_markedDrawFingerprints.count(g_activeHuntedDrawFingerprint) == 1)
+		g_markedDrawFingerprints.erase(g_activeHuntedDrawFingerprint);
+	else
+		g_markedDrawFingerprints.insert(g_activeHuntedDrawFingerprint);
+}
+
+static bool groupContainsShaderHash(const ToggleGroup& group, uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
+{
+	return group.getPixelShaderHashes().count(pixelHash) == 1 ||
+		group.getVertexShaderHashes().count(vertexHash) == 1 ||
+		group.getComputeShaderHashes().count(computeHash) == 1;
+}
+
+bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, uint32_t valueA, uint32_t valueB, uint32_t valueC, uint32_t valueD)
 {
 	if (nullptr == commandList)
 	{
 		return false;
 	}
 
-	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+	CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+	++commandListData.drawCallCounter;
 
-	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
-	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
-	for (auto& group : g_toggleGroups)
+	const uint32_t pixelHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
+	const uint32_t vertexHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
+	const uint32_t computeHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
+	const uint64_t drawFingerprint = buildDrawFingerprint(pixelHash, vertexHash, computeHash, drawKind, valueA, valueB, valueC, valueD);
+
+	if (g_toggleGroupIdShaderEditing >= 0 && g_activeCollectorFrameCounter > 0 && drawFingerprint != 0)
 	{
-		for (auto hash : group.getPixelShaderHashes())
+		if (g_collectedDrawFingerprints.insert(drawFingerprint).second)
 		{
-			if (group.isActive() && hash == shaderHash)
-			{
-				blockCall = true;
-				break;
-			}
+			g_collectedDrawFingerprintsOrdered.push_back(drawFingerprint);
 		}
 	}
 
-	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
-	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
-	for (auto& group : g_toggleGroups)
+	bool blockCall = g_pixelShaderManager.isBlockedShader(pixelHash) ||
+		g_vertexShaderManager.isBlockedShader(vertexHash) ||
+		g_computeShaderManager.isBlockedShader(computeHash);
+
+	if (g_drawFingerprintPreviewEnabled &&
+		g_toggleGroupIdShaderEditing >= 0 &&
+		g_activeHuntedDrawFingerprint != 0 &&
+		drawFingerprint == g_activeHuntedDrawFingerprint)
 	{
-		for (auto hash : group.getVertexShaderHashes())
-		{
-			if (group.isActive() && hash == shaderHash)
-			{
-				blockCall = true;
-				break;
-			}
-		}
+		blockCall = true;
 	}
 
-	shaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
-	blockCall |= g_computeShaderManager.isBlockedShader(shaderHash);
 	for (auto& group : g_toggleGroups)
 	{
-		for (auto hash : group.getComputeShaderHashes())
+		if (!group.isActive())
+			continue;
+
+		if (group.hasDrawFingerprints())
 		{
-			if (group.isActive() && hash == shaderHash)
+			if (group.getDrawFingerprints().count(drawFingerprint) == 1)
 			{
 				blockCall = true;
 				break;
 			}
+
+			continue;
+		}
+
+		if (groupContainsShaderHash(group, pixelHash, vertexHash, computeHash))
+		{
+			blockCall = true;
+			break;
 		}
 	}
 
 	return blockCall;
 }
 
-static bool onDraw(command_list* commandList, uint32_t, uint32_t, uint32_t, uint32_t)
+
+static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
-	return blockDrawCallForCommandList(commandList);
+	return blockDrawCallForCommandList(commandList, 1, vertex_count, instance_count, first_vertex, first_instance);
 }
 
-static bool onDrawIndexed(command_list* commandList, uint32_t, uint32_t, uint32_t, int32_t, uint32_t)
+static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance)
 {
-	return blockDrawCallForCommandList(commandList);
+	return blockDrawCallForCommandList(commandList, 2, index_count, instance_count, first_index, static_cast<uint32_t>(vertex_offset) ^ first_instance);
 }
 
 static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource, uint64_t, uint32_t, uint32_t)
@@ -962,7 +986,7 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 	case indirect_command::draw:
 	case indirect_command::draw_indexed:
 	case indirect_command::dispatch:
-		return blockDrawCallForCommandList(commandList);
+		return blockDrawCallForCommandList(commandList, static_cast<uint32_t>(type) + 10u, 0, 0, 0, 0);
 	default:
 		return false;
 	}
@@ -1259,7 +1283,35 @@ static void onReshadePresent(effect_runtime* runtime)
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
 	s_prevNP9Down = np9Down;
+
+	if (g_toggleGroupIdShaderEditing >= 0 && g_activeCollectorFrameCounter == 0)
+	{
+		bool np0Down = is_key_down_numpad_only(runtime, VK_NUMPAD0);
+		bool np0Pressed = np0Down && !s_prevNP0Down;
+		if (np0Pressed)
+		{
+			selectPreviousDrawFingerprint();
+		}
+		s_prevNP0Down = np0Down;
+
+		bool npDecimalDown = is_key_down_numpad_only(runtime, VK_DECIMAL);
+		bool npDecimalPressed = npDecimalDown && !s_prevNPDecimalDown;
+		if (npDecimalPressed)
+		{
+			selectNextDrawFingerprint();
+		}
+		s_prevNPDecimalDown = npDecimalDown;
+
+		bool npAddDown = is_key_down_numpad_only(runtime, VK_ADD);
+		bool npAddPressed = npAddDown && !s_prevNPAddDown;
+		if (npAddPressed)
+		{
+			toggleMarkOnActiveDrawFingerprint();
+		}
+		s_prevNPAddDown = npAddDown;
+	}
 }
+
 
 void endKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
 {
@@ -1401,6 +1453,8 @@ void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditin
 			g_vertexShaderManager.getMarkedShaderHashes(),
 			g_computeShaderManager.getMarkedShaderHashes());
 
+		groupEditing.storeCollectedDrawFingerprints(g_markedDrawFingerprints);
+
 		g_pixelShaderManager.stopHuntingMode();
 		g_vertexShaderManager.stopHuntingMode();
 		g_computeShaderManager.stopHuntingMode();
@@ -1424,6 +1478,9 @@ void startShaderEditing(ToggleGroup& groupEditing)
 	g_pixelShaderManager.startHuntingMode(groupEditing.getPixelShaderHashes());
 	g_vertexShaderManager.startHuntingMode(groupEditing.getVertexShaderHashes());
 	g_computeShaderManager.startHuntingMode(groupEditing.getComputeShaderHashes());
+
+	clearDrawFingerprintHuntingState();
+	g_markedDrawFingerprints = groupEditing.getDrawFingerprints();
 
 	groupEditing.clearHashes();
 }
@@ -1467,6 +1524,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8 = previous / next marked compute shader");
 		ImGui::TextUnformatted("* Numpad 9 = mark / unmark compute shader");
 		ImGui::TextUnformatted("* Hold 1 / 2 / 4 / 5 / 7 / 8 to scroll faster");
+		ImGui::TextUnformatted("* Draw HUD hunt: Numpad 0 / Decimal = previous / next draw fingerprint");
+		ImGui::TextUnformatted("* Draw HUD hunt: Numpad + = mark / unmark draw fingerprint");
 		ImGui::PopTextWrapPos();
 	}
 
@@ -1632,6 +1691,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					ImGui::Text(" Hold ");
 					ImGui::PopStyleColor();
 				}
+			}
+
+			if (group.hasDrawFingerprints())
+			{
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.50f, 0.85f, 1.00f, 1.0f));
+				ImGui::Text(" Draw-filtered ");
+				ImGui::PopStyleColor();
 			}
 
 			if (group.isActive())

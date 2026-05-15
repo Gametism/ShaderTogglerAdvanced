@@ -117,6 +117,10 @@ static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_
 static std::chrono::steady_clock::time_point s_holdStartNP1, s_holdStartNP2, s_holdStartNP4, s_holdStartNP5, s_holdStartNP7, s_holdStartNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 
+static std::chrono::steady_clock::time_point s_lastNP0, s_lastNPDecimal;
+static std::chrono::steady_clock::time_point s_holdStartNP0, s_holdStartNPDecimal;
+static bool s_np0Held = false, s_npDecimalHeld = false;
+
 static bool s_prevNP1Down = false;
 static bool s_prevNP2Down = false;
 static bool s_prevNP3Down = false;
@@ -1451,6 +1455,19 @@ static void onReshadePresent(effect_runtime* runtime)
 		if (np0Pressed)
 		{
 			selectPreviousDrawFingerprint();
+			s_lastNP0 = now;
+			s_holdStartNP0 = now;
+			s_np0Held = true;
+		}
+		else if (np0Down && s_np0Held &&
+			std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNP0).count() >= getAcceleratedRepeatMs(s_holdStartNP0, now))
+		{
+			selectPreviousDrawFingerprint();
+			s_lastNP0 = now;
+		}
+		else if (!np0Down)
+		{
+			s_np0Held = false;
 		}
 		s_prevNP0Down = np0Down;
 
@@ -1459,6 +1476,19 @@ static void onReshadePresent(effect_runtime* runtime)
 		if (npDecimalPressed)
 		{
 			selectNextDrawFingerprint();
+			s_lastNPDecimal = now;
+			s_holdStartNPDecimal = now;
+			s_npDecimalHeld = true;
+		}
+		else if (npDecimalDown && s_npDecimalHeld &&
+			std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastNPDecimal).count() >= getAcceleratedRepeatMs(s_holdStartNPDecimal, now))
+		{
+			selectNextDrawFingerprint();
+			s_lastNPDecimal = now;
+		}
+		else if (!npDecimalDown)
+		{
+			s_npDecimalHeld = false;
 		}
 		s_prevNPDecimalDown = npDecimalDown;
 
@@ -1477,6 +1507,15 @@ static void onReshadePresent(effect_runtime* runtime)
 			markNearbyDrawFingerprintsForActiveShaderSet();
 		}
 		s_prevNPSubtractDown = npSubtractDown;
+	}
+	else
+	{
+		s_np0Held = false;
+		s_npDecimalHeld = false;
+		s_prevNP0Down = false;
+		s_prevNPDecimalDown = false;
+		s_prevNPAddDown = false;
+		s_prevNPSubtractDown = false;
 	}
 }
 

@@ -21,7 +21,7 @@ This version adds:
 - a global hotkey modifier system for all defined hotkeys
 - improved shader detection behavior for DXVK and RenoDX (DX9)
 - sorting functions
-- **Timed Suppression Keys for Auto-hide / Timed Mode groups**
+- **timed suppression keys for auto-hide / timed mode groups**
 
 ---
 

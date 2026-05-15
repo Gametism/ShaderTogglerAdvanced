@@ -82,6 +82,12 @@ static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
+static std::atomic_uint32_t g_currentFrameDrawCallIndex = 0;
+static bool g_drawCallHuntingMode = false;
+static uint32_t g_huntedDrawCallIndex = 1;
+static uint32_t g_lastFrameDrawCallCount = 0;
+static std::unordered_set<uint32_t> g_markedDrawCallIndices;
+
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
@@ -295,6 +301,72 @@ static void appendSortedHashesToSignature(std::string& data, const char* prefix,
 	}
 }
 
+static bool hasDrawCallFilterMatch(const ToggleGroup& group, uint32_t drawCallIndex)
+{
+	if (!group.hasDrawCallIndices())
+		return true;
+
+	return group.getDrawCallIndices().count(drawCallIndex) == 1;
+}
+
+static bool groupBlocksHashAtDrawCall(
+	const ToggleGroup& group,
+	const std::unordered_set<uint32_t>& shaderHashes,
+	uint32_t shaderHash,
+	uint32_t drawCallIndex)
+{
+	if (!group.isActive() || shaderHash == 0)
+		return false;
+
+	if (shaderHashes.count(shaderHash) != 1)
+		return false;
+
+	return hasDrawCallFilterMatch(group, drawCallIndex);
+}
+
+static bool isCurrentDrawCallHunted(uint32_t drawCallIndex)
+{
+	return g_drawCallHuntingMode &&
+		g_toggleGroupIdShaderEditing >= 0 &&
+		drawCallIndex > 0 &&
+		drawCallIndex == g_huntedDrawCallIndex;
+}
+
+static void markOrUnmarkCurrentDrawCall()
+{
+	if (!g_drawCallHuntingMode || g_huntedDrawCallIndex == 0)
+		return;
+
+	if (g_markedDrawCallIndices.count(g_huntedDrawCallIndex) == 1)
+		g_markedDrawCallIndices.erase(g_huntedDrawCallIndex);
+	else
+		g_markedDrawCallIndices.insert(g_huntedDrawCallIndex);
+}
+
+static void huntNextDrawCall()
+{
+	if (!g_drawCallHuntingMode)
+		return;
+
+	const uint32_t maxIndex = (g_lastFrameDrawCallCount > 0) ? g_lastFrameDrawCallCount : 1;
+	if (g_huntedDrawCallIndex >= maxIndex)
+		g_huntedDrawCallIndex = 1;
+	else
+		++g_huntedDrawCallIndex;
+}
+
+static void huntPreviousDrawCall()
+{
+	if (!g_drawCallHuntingMode)
+		return;
+
+	const uint32_t maxIndex = (g_lastFrameDrawCallCount > 0) ? g_lastFrameDrawCallCount : 1;
+	if (g_huntedDrawCallIndex <= 1)
+		g_huntedDrawCallIndex = maxIndex;
+	else
+		--g_huntedDrawCallIndex;
+}
+
 static bool isTimedTriggerBindingActive(const ToggleGroup::TimedTriggerBinding& binding, reshade::api::effect_runtime* runtime)
 {
 	switch (binding.mode)
@@ -401,6 +473,8 @@ static std::string buildIniSignature()
 		{
 			data += "|TimedSuppressionKey" + std::to_string(i) + "=" + std::to_string(group.getTimedSuppressionKeyAt(i).toInt());
 		}
+
+		appendSortedHashesToSignature(data, "D", group.getDrawCallIndices());
 
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
 		appendSortedHashesToSignature(data, "V", group.getVertexShaderHashes());
@@ -812,6 +886,22 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 			displayShaderManagerInfo(g_vertexShaderManager, "vertex");
 			displayShaderManagerInfo(g_pixelShaderManager, "pixel");
 			displayShaderManagerInfo(g_computeShaderManager, "compute");
+
+			if (g_drawCallHuntingMode)
+			{
+				ImGui::Separator();
+				ImGui::Text("Draw-call hunting: ON");
+				ImGui::Text("Current draw call: %u / %u", g_huntedDrawCallIndex, g_lastFrameDrawCallCount);
+				ImGui::Text("Marked draw calls in group: %u", static_cast<uint32_t>(g_markedDrawCallIndices.size()));
+				ImGui::TextUnformatted("Numpad 0 / Decimal = previous / next draw call, Numpad + = mark, Numpad - = clear marks");
+
+				if (g_markedDrawCallIndices.count(g_huntedDrawCallIndex) == 1)
+				{
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+					ImGui::TextUnformatted("Current draw call is part of this toggle group.");
+					ImGui::PopStyleColor();
+				}
+			}
 		}
 		ImGui::End();
 	}
@@ -919,7 +1009,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 	}
 }
 
-bool blockDrawCallForCommandList(command_list* commandList)
+bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawCallIndex)
 {
 	if (nullptr == commandList)
 	{
@@ -928,59 +1018,60 @@ bool blockDrawCallForCommandList(command_list* commandList)
 
 	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
 
+	bool blockCall = isCurrentDrawCallHunted(drawCallIndex);
+
 	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
-	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
-	for (auto& group : g_toggleGroups)
+	blockCall |= g_pixelShaderManager.isBlockedShader(shaderHash);
+	for (const auto& group : g_toggleGroups)
 	{
-		for (auto hash : group.getPixelShaderHashes())
+		if (groupBlocksHashAtDrawCall(group, group.getPixelShaderHashes(), shaderHash, drawCallIndex))
 		{
-			if (group.isActive() && hash == shaderHash)
-			{
-				blockCall = true;
-				break;
-			}
+			blockCall = true;
+			break;
 		}
 	}
 
 	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
 	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
-	for (auto& group : g_toggleGroups)
+	for (const auto& group : g_toggleGroups)
 	{
-		for (auto hash : group.getVertexShaderHashes())
+		if (groupBlocksHashAtDrawCall(group, group.getVertexShaderHashes(), shaderHash, drawCallIndex))
 		{
-			if (group.isActive() && hash == shaderHash)
-			{
-				blockCall = true;
-				break;
-			}
+			blockCall = true;
+			break;
 		}
 	}
 
 	shaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
 	blockCall |= g_computeShaderManager.isBlockedShader(shaderHash);
-	for (auto& group : g_toggleGroups)
+	for (const auto& group : g_toggleGroups)
 	{
-		for (auto hash : group.getComputeShaderHashes())
+		if (groupBlocksHashAtDrawCall(group, group.getComputeShaderHashes(), shaderHash, drawCallIndex))
 		{
-			if (group.isActive() && hash == shaderHash)
-			{
-				blockCall = true;
-				break;
-			}
+			blockCall = true;
+			break;
 		}
 	}
 
 	return blockCall;
 }
 
+static uint32_t nextDrawCallIndex()
+{
+	const uint32_t index = ++g_currentFrameDrawCallIndex;
+	if (index > g_lastFrameDrawCallCount)
+		g_lastFrameDrawCallCount = index;
+	return index;
+}
+
 static bool onDraw(command_list* commandList, uint32_t, uint32_t, uint32_t, uint32_t)
 {
-	return blockDrawCallForCommandList(commandList);
+	return blockDrawCallForCommandList(commandList, nextDrawCallIndex());
 }
 
 static bool onDrawIndexed(command_list* commandList, uint32_t, uint32_t, uint32_t, int32_t, uint32_t)
 {
-	return blockDrawCallForCommandList(commandList);
+	return blockDrawCallForCommandList(commandList, nextDrawCallIndex());
 }
 
 static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command type, resource, uint64_t, uint32_t, uint32_t)
@@ -991,7 +1082,7 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 	case indirect_command::draw:
 	case indirect_command::draw_indexed:
 	case indirect_command::dispatch:
-		return blockDrawCallForCommandList(commandList);
+		return blockDrawCallForCommandList(commandList, nextDrawCallIndex());
 	default:
 		return false;
 	}
@@ -999,6 +1090,8 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
+	g_currentFrameDrawCallIndex = 0;
+
 	if (g_activeCollectorFrameCounter > 0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -1138,6 +1231,53 @@ static void onReshadePresent(effect_runtime* runtime)
 	const int NP7 = VK_NUMPAD7;
 	const int NP8 = VK_NUMPAD8;
 	const int NP9 = VK_NUMPAD9;
+	const int NP0 = VK_NUMPAD0;
+	const int NP_DECIMAL = VK_DECIMAL;
+	const int NP_ADD = VK_ADD;
+	const int NP_SUBTRACT = VK_SUBTRACT;
+
+	static bool s_prevNP0Down = false;
+	static bool s_prevNPDecimalDown = false;
+	static bool s_prevNPAddDown = false;
+	static bool s_prevNPSubtractDown = false;
+
+	bool np0Down = is_key_down_numpad_only(runtime, NP0);
+	bool np0Pressed = np0Down && !s_prevNP0Down;
+	if (np0Pressed && g_toggleGroupIdShaderEditing >= 0)
+	{
+		if (!g_drawCallHuntingMode)
+			g_drawCallHuntingMode = true;
+		huntPreviousDrawCall();
+	}
+	s_prevNP0Down = np0Down;
+
+	bool npDecimalDown = is_key_down_numpad_only(runtime, NP_DECIMAL);
+	bool npDecimalPressed = npDecimalDown && !s_prevNPDecimalDown;
+	if (npDecimalPressed && g_toggleGroupIdShaderEditing >= 0)
+	{
+		if (!g_drawCallHuntingMode)
+			g_drawCallHuntingMode = true;
+		huntNextDrawCall();
+	}
+	s_prevNPDecimalDown = npDecimalDown;
+
+	bool npAddDown = is_key_down_numpad_only(runtime, NP_ADD);
+	bool npAddPressed = npAddDown && !s_prevNPAddDown;
+	if (npAddPressed && g_toggleGroupIdShaderEditing >= 0)
+	{
+		if (!g_drawCallHuntingMode)
+			g_drawCallHuntingMode = true;
+		markOrUnmarkCurrentDrawCall();
+	}
+	s_prevNPAddDown = npAddDown;
+
+	bool npSubtractDown = is_key_down_numpad_only(runtime, NP_SUBTRACT);
+	bool npSubtractPressed = npSubtractDown && !s_prevNPSubtractDown;
+	if (npSubtractPressed && g_toggleGroupIdShaderEditing >= 0)
+	{
+		g_markedDrawCallIndices.clear();
+	}
+	s_prevNPSubtractDown = npSubtractDown;
 
 	bool np1Down = is_key_down_numpad_only(runtime, NP1);
 	bool np1Pressed = np1Down && !s_prevNP1Down;
@@ -1429,12 +1569,16 @@ void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditin
 			g_pixelShaderManager.getMarkedShaderHashes(),
 			g_vertexShaderManager.getMarkedShaderHashes(),
 			g_computeShaderManager.getMarkedShaderHashes());
+		groupEditing.storeDrawCallIndices(g_markedDrawCallIndices);
 
 		g_pixelShaderManager.stopHuntingMode();
 		g_vertexShaderManager.stopHuntingMode();
 		g_computeShaderManager.stopHuntingMode();
 	}
 	g_toggleGroupIdShaderEditing = -1;
+	g_drawCallHuntingMode = false;
+	g_huntedDrawCallIndex = 1;
+	g_markedDrawCallIndices.clear();
 }
 
 void startShaderEditing(ToggleGroup& groupEditing)
@@ -1453,6 +1597,9 @@ void startShaderEditing(ToggleGroup& groupEditing)
 	g_pixelShaderManager.startHuntingMode(groupEditing.getPixelShaderHashes());
 	g_vertexShaderManager.startHuntingMode(groupEditing.getVertexShaderHashes());
 	g_computeShaderManager.startHuntingMode(groupEditing.getComputeShaderHashes());
+	g_markedDrawCallIndices = groupEditing.getDrawCallIndices();
+	g_drawCallHuntingMode = false;
+	g_huntedDrawCallIndex = 1;
 
 	groupEditing.clearHashes();
 }
@@ -1495,6 +1642,9 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::TextUnformatted("* Numpad 7 / 8 = previous / next compute shader");
 		ImGui::TextUnformatted("* Ctrl + Numpad 7 / 8 = previous / next marked compute shader");
 		ImGui::TextUnformatted("* Numpad 9 = mark / unmark compute shader");
+		ImGui::TextUnformatted("* Numpad 0 / Decimal = previous / next draw call");
+		ImGui::TextUnformatted("* Numpad + = mark / unmark draw call");
+		ImGui::TextUnformatted("* Numpad - = clear marked draw calls");
 		ImGui::TextUnformatted("* Hold 1 / 2 / 4 / 5 / 7 / 8 to scroll faster");
 		ImGui::PopTextWrapPos();
 	}
@@ -1630,6 +1780,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 			ImGui::SameLine();
 			ImGui::Text(" %s (%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str());
+
+			if (group.hasDrawCallIndices())
+			{
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.60f, 0.80f, 1.00f, 1.0f));
+				ImGui::Text(" Draw-filter:%u ", static_cast<uint32_t>(group.getDrawCallIndices().size()));
+				ImGui::PopStyleColor();
+			}
 
 			if (group.isTimedMode())
 			{

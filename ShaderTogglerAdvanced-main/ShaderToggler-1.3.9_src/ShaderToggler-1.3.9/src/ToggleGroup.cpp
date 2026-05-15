@@ -353,6 +353,26 @@ namespace ShaderToggler
 	const std::unordered_set<uint32_t>& ToggleGroup::getVertexShaderHashes() const { return m_vertexShaderHashes; }
 	const std::unordered_set<uint32_t>& ToggleGroup::getComputeShaderHashes() const { return m_computeShaderHashes; }
 
+	void ToggleGroup::clearDrawCallIndices()
+	{
+		m_drawCallIndices.clear();
+	}
+
+	void ToggleGroup::storeDrawCallIndices(const std::unordered_set<uint32_t>& drawCallIndices)
+	{
+		m_drawCallIndices = drawCallIndices;
+	}
+
+	const std::unordered_set<uint32_t>& ToggleGroup::getDrawCallIndices() const
+	{
+		return m_drawCallIndices;
+	}
+
+	bool ToggleGroup::hasDrawCallIndices() const
+	{
+		return !m_drawCallIndices.empty();
+	}
+
 	ToggleGroup ToggleGroup::makeDuplicate() const
 	{
 		ToggleGroup copy(*this);
@@ -456,6 +476,13 @@ namespace ShaderToggler
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 		else
 			m_toggleKey = KeyData::fromInt(toggleKeyValue);
+
+		const std::vector<uint32_t> drawCallIndexValues = iniFile.GetArray("DrawCallIndices", sectionRoot);
+		for (const auto drawCallIndex : drawCallIndexValues)
+		{
+			if (drawCallIndex > 0)
+				m_drawCallIndices.insert(drawCallIndex);
+		}
 
 		const std::vector<uint32_t> timedTriggerKeyValues = iniFile.GetArray("TimedTriggerKeys", sectionRoot);
 		const std::vector<uint32_t> timedTriggerModeValues = iniFile.GetArray("TimedTriggerModes", sectionRoot);
@@ -583,6 +610,12 @@ namespace ShaderToggler
 
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
+
+		if (!m_drawCallIndices.empty())
+		{
+			std::vector<uint32_t> drawCallIndexValues(m_drawCallIndices.begin(), m_drawCallIndices.end());
+			iniFile.SetArray("DrawCallIndices", drawCallIndexValues, "", sectionRoot);
+		}
 
 		if (!m_timedTriggerKeys.empty())
 		{

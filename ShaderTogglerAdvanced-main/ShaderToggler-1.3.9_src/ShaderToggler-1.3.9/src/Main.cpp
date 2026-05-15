@@ -35,6 +35,11 @@
 #include <cstring>
 #include <cstdio>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <cstdint>
+#include <climits>
+#include <cctype>
 
 #ifdef min
 #undef min
@@ -70,12 +75,13 @@ static std::vector<ToggleGroup> g_toggleGroups;
 static std::atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static std::atomic_int g_toggleGroupIdTimedTriggerKeyEditing = -1;
 static std::atomic_int g_toggleGroupTimedTriggerKeySlotEditing = -1;
+static std::atomic_int g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+static std::atomic_int g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 static std::atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
 
-// 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHotkeyLastToggleTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
@@ -83,12 +89,10 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTim
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
 static const int g_groupHotkeyDebounceMs = 150;
 
-// 
 static std::chrono::steady_clock::time_point s_lastNP1, s_lastNP2, s_lastNP4, s_lastNP5, s_lastNP7, s_lastNP8;
 static std::chrono::steady_clock::time_point s_holdStartNP1, s_holdStartNP2, s_holdStartNP4, s_holdStartNP5, s_holdStartNP7, s_holdStartNP8;
 static bool s_np1Held = false, s_np2Held = false, s_np4Held = false, s_np5Held = false, s_np7Held = false, s_np8Held = false;
 
-//
 static bool s_prevNP1Down = false;
 static bool s_prevNP2Down = false;
 static bool s_prevNP3Down = false;
@@ -104,11 +108,9 @@ static const int s_holdRepeatMidMs = 120;
 static const int s_holdRepeatFastMs = 70;
 static const int s_holdRepeatVeryFastMs = 35;
 
-//
 static const char* GT_CREATOR = "Gametism";
 static const char* GT_CACHE_KEY = "CacheStamp";
 
-//
 static const char* GT_SIG_A = "STA";
 static const char* GT_SIG_B = "Gametism";
 static const char* GT_SIG_C = "ShaderToggler";
@@ -127,19 +129,6 @@ static const char* GT_FOOTER =
 	"; ==========================================\n";
 
 static bool g_uiStyleInitialized = false;
-
-static std::unordered_set<uint32_t> g_frameActivePixelHashes;
-static std::unordered_set<uint32_t> g_frameActiveVertexHashes;
-static std::unordered_set<uint32_t> g_frameActiveComputeHashes;
-
-static std::unordered_map<int, int> g_reactivePresentFrames;
-static std::unordered_map<int, int> g_reactiveAbsentFrames;
-static std::unordered_map<int, bool> g_reactivePreviousState;
-static std::unordered_map<int, bool> g_reactiveHasPreviousState;
-
-static const int g_reactiveEnterFrames = 3;
-static const int g_reactiveExitFrames = 12;
-
 
 static bool is_key_down_numpad_only(reshade::api::effect_runtime* runtime, int vk_numpad)
 {
@@ -173,13 +162,28 @@ static uint64_t fnv1a64(const std::string& text)
 	return hash;
 }
 
+static std::string toHex64(uint64_t value)
+{
+	char buf[17] = {};
+	snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(value));
+	return std::string(buf);
+}
+
+static std::string toLowerCopy(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(),
+		[](unsigned char c)
+		{
+			return static_cast<char>(std::tolower(c));
+		});
+
+	return text;
+}
 
 static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
 {
 	const uint8_t keyCode = group.getToggleKey().getKeyCode();
 
-	// Gametism hotkey layout order, matching the visual layout:
-	// End -> numpad operators -> Backspace/Page keys -> arrows -> numpad row -> Insert/Delete.
 	switch (keyCode)
 	{
 	case VK_END:      return 0;
@@ -212,17 +216,28 @@ static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
 	}
 }
 
-static void sortToggleGroupsByHotkeyLayout()
+static void sortToggleGroupsByHotkey()
 {
 	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
 		[](const ToggleGroup& a, const ToggleGroup& b)
 		{
 			const int priorityA = getHotkeyLayoutSortPriority(a);
 			const int priorityB = getHotkeyLayoutSortPriority(b);
-			if (priorityA != priorityB)
-				return priorityA < priorityB;
 
-			return a.getName() < b.getName();
+			if (priorityA != priorityB)
+			{
+				return priorityA < priorityB;
+			}
+
+			const int keyA = a.getToggleKey().toInt();
+			const int keyB = b.getToggleKey().toInt();
+
+			if (keyA != keyB)
+			{
+				return keyA < keyB;
+			}
+
+			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
 		});
 
 	saveShaderTogglerIniFile();
@@ -233,7 +248,15 @@ static void sortToggleGroupsByNameAZ()
 	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
 		[](const ToggleGroup& a, const ToggleGroup& b)
 		{
-			return a.getName() < b.getName();
+			const std::string nameA = toLowerCopy(a.getName());
+			const std::string nameB = toLowerCopy(b.getName());
+
+			if (nameA != nameB)
+			{
+				return nameA < nameB;
+			}
+
+			return a.getId() < b.getId();
 		});
 
 	saveShaderTogglerIniFile();
@@ -244,22 +267,18 @@ static void sortToggleGroupsByNameLength()
 	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
 		[](const ToggleGroup& a, const ToggleGroup& b)
 		{
-			const size_t lenA = a.getName().length();
-			const size_t lenB = b.getName().length();
-			if (lenA != lenB)
-				return lenA < lenB;
+			const size_t lengthA = a.getName().length();
+			const size_t lengthB = b.getName().length();
 
-			return a.getName() < b.getName();
+			if (lengthA != lengthB)
+			{
+				return lengthA < lengthB;
+			}
+
+			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
 		});
 
 	saveShaderTogglerIniFile();
-}
-
-static std::string toHex64(uint64_t value)
-{
-	char buf[17] = {};
-	snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(value));
-	return std::string(buf);
 }
 
 static void appendSortedHashesToSignature(std::string& data, const char* prefix, const std::unordered_set<uint32_t>& hashes)
@@ -306,6 +325,20 @@ static bool isAnyTimedTriggerActive(const ToggleGroup& group, reshade::api::effe
 	return group.getToggleKey().isKeyPressed(runtime);
 }
 
+static bool isAnyTimedSuppressionKeyDown(const ToggleGroup& group, reshade::api::effect_runtime* runtime)
+{
+	if (!group.hasTimedSuppressionKeys())
+		return false;
+
+	for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
+	{
+		if (group.getTimedSuppressionKeyAt(i).isKeyDown(runtime))
+			return true;
+	}
+
+	return false;
+}
+
 static void setGroupActiveWithEditRefresh(ToggleGroup& group, bool newActive)
 {
 	const bool previousActive = group.isActive();
@@ -323,7 +356,6 @@ static std::string buildIniSignature()
 {
 	std::string data;
 
-	//
 	data += "Creator=";
 	data += GT_CREATOR;
 	data += "|AmountGroups=";
@@ -333,7 +365,6 @@ static std::string buildIniSignature()
 	data += "|GlobalHotkeyModifier=";
 	data += std::to_string(KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()));
 
-	//
 	data += "|SigA=";
 	data += GT_SIG_A;
 	data += "|SigB=";
@@ -363,6 +394,12 @@ static std::string buildIniSignature()
 		{
 			data += "|TimedTriggerKey" + std::to_string(i) + "=" + std::to_string(group.getTimedTriggerKeyAt(i).toInt());
 			data += "|TimedTriggerMode" + std::to_string(i) + "=" + std::to_string(ToggleGroup::timedTriggerModeToInt(group.getTimedTriggerModeAt(i)));
+		}
+
+		data += "|TimedSuppressionCount=" + std::to_string(group.getTimedSuppressionKeyCount());
+		for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
+		{
+			data += "|TimedSuppressionKey" + std::to_string(i) + "=" + std::to_string(group.getTimedSuppressionKeyAt(i).toInt());
 		}
 
 		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
@@ -717,75 +754,6 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 	}
 }
 
-
-static bool containsAnyReactiveHash(
-	const std::unordered_set<uint32_t>& frameHashes,
-	const std::unordered_set<uint32_t>& watcherHashes)
-{
-	for (uint32_t hash : watcherHashes)
-	{
-		if (frameHashes.find(hash) != frameHashes.end())
-			return true;
-	}
-
-	return false;
-}
-
-static bool isReactiveWatcherPresent(const ToggleGroup& group)
-{
-	return
-		containsAnyReactiveHash(g_frameActivePixelHashes, group.getReactivePixelShaderHashes()) ||
-		containsAnyReactiveHash(g_frameActiveVertexHashes, group.getReactiveVertexShaderHashes()) ||
-		containsAnyReactiveHash(g_frameActiveComputeHashes, group.getReactiveComputeShaderHashes());
-}
-
-static void updateReactiveGroup(ToggleGroup& group)
-{
-	if (!group.isReactiveTriggerEnabled() || group.getReactiveTriggerMode() == ToggleGroup::ReactiveTriggerMode::Disabled)
-		return;
-
-	const bool watcherPresent = isReactiveWatcherPresent(group);
-	const int groupId = group.getId();
-
-	if (watcherPresent)
-	{
-		g_reactivePresentFrames[groupId]++;
-		g_reactiveAbsentFrames[groupId] = 0;
-	}
-	else
-	{
-		g_reactiveAbsentFrames[groupId]++;
-		g_reactivePresentFrames[groupId] = 0;
-	}
-
-	if (g_reactivePresentFrames[groupId] >= g_reactiveEnterFrames)
-	{
-		if (!g_reactiveHasPreviousState[groupId])
-		{
-			g_reactivePreviousState[groupId] = group.isActive();
-			g_reactiveHasPreviousState[groupId] = true;
-		}
-
-		if (group.getReactiveTriggerMode() == ToggleGroup::ReactiveTriggerMode::ActivateWhilePresent)
-		{
-			setGroupActiveWithEditRefresh(group, true);
-		}
-		else if (group.getReactiveTriggerMode() == ToggleGroup::ReactiveTriggerMode::DeactivateWhilePresent)
-		{
-			setGroupActiveWithEditRefresh(group, false);
-		}
-	}
-
-	if (g_reactiveAbsentFrames[groupId] >= g_reactiveExitFrames)
-	{
-		if (g_reactiveHasPreviousState[groupId])
-		{
-			setGroupActiveWithEditRefresh(group, g_reactivePreviousState[groupId]);
-			g_reactiveHasPreviousState[groupId] = false;
-		}
-	}
-}
-
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
 	if (nullptr != commandList && pipelineHandle.handle != 0)
@@ -798,13 +766,6 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 		{
 			return;
 		}
-		if (handleHasPixelShaderAttached)
-			g_frameActivePixelHashes.insert(g_pixelShaderManager.getShaderHash(pipelineHandle.handle));
-		if (handleHasVertexShaderAttached)
-			g_frameActiveVertexHashes.insert(g_vertexShaderManager.getShaderHash(pipelineHandle.handle));
-		if (handleHasComputeShaderAttached)
-			g_frameActiveComputeHashes.insert(g_computeShaderManager.getShaderHash(pipelineHandle.handle));
-
 
 		CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
@@ -927,20 +888,24 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
-		const bool timedTriggerActiveNow = isAnyTimedTriggerActive(group, runtime);
+		const bool timedSuppressedNow = isAnyTimedSuppressionKeyDown(group, runtime);
+		const bool timedTriggerActiveNow = !timedSuppressedNow && isAnyTimedTriggerActive(group, runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
-
-		if (group.isReactiveTriggerEnabled())
-		{
-			updateReactiveGroup(group);
-			g_groupHotkeyWasDown[group.getId()] = isDownNow;
-			continue;
-		}
 
 		if (group.isTimedMode())
 		{
 			const bool timedTargetActiveState = !group.isTimedModeInverted();
 			const bool timedRestingActiveState = group.isTimedModeInverted();
+
+			if (timedSuppressedNow)
+			{
+				setGroupActiveWithEditRefresh(group, timedRestingActiveState);
+				g_groupLastTimedTriggerTime.erase(group.getId());
+				g_groupTimedVisibleSince.erase(group.getId());
+				g_groupTimedFadeOutStart.erase(group.getId());
+				g_groupHotkeyWasDown[group.getId()] = isDownNow;
+				continue;
+			}
 
 			if (timedTriggerActiveNow)
 			{
@@ -1204,9 +1169,6 @@ static void onReshadePresent(effect_runtime* runtime)
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
 	s_prevNP9Down = np9Down;
-	g_frameActivePixelHashes.clear();
-	g_frameActiveVertexHashes.clear();
-	g_frameActiveComputeHashes.clear();
 }
 
 void endKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
@@ -1233,6 +1195,12 @@ void startKeyBindingEditing(ToggleGroup& groupEditing)
 	{
 		g_toggleGroupIdTimedTriggerKeyEditing = -1;
 		g_toggleGroupTimedTriggerKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
+	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+		g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 		g_keyCollector.clear();
 	}
 	g_toggleGroupIdKeyBindingEditing = groupEditing.getId();
@@ -1277,8 +1245,61 @@ void startTimedTriggerKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex
 		g_toggleGroupIdKeyBindingEditing = -1;
 		g_keyCollector.clear();
 	}
+	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+		g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
 	g_toggleGroupIdTimedTriggerKeyEditing = groupEditing.getId();
 	g_toggleGroupTimedTriggerKeySlotEditing = slotIndex;
+}
+
+void endTimedSuppressionKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
+{
+	if (acceptCollectedBinding &&
+		g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
+		g_toggleGroupTimedSuppressionKeySlotEditing >= 0 &&
+		g_keyCollector.isValid())
+	{
+		groupEditing.setTimedSuppressionKeyAt(
+			static_cast<size_t>(g_toggleGroupTimedSuppressionKeySlotEditing),
+			g_keyCollector);
+	}
+
+	g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+	g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+	g_keyCollector.clear();
+}
+
+void startTimedSuppressionKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex)
+{
+	if (g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
+		g_toggleGroupTimedSuppressionKeySlotEditing == slotIndex)
+	{
+		return;
+	}
+
+	if (g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		endTimedSuppressionKeyBindingEditing(false, groupEditing);
+	}
+
+	if (g_toggleGroupIdKeyBindingEditing >= 0)
+	{
+		g_toggleGroupIdKeyBindingEditing = -1;
+		g_keyCollector.clear();
+	}
+
+	if (g_toggleGroupIdTimedTriggerKeyEditing >= 0)
+	{
+		g_toggleGroupIdTimedTriggerKeyEditing = -1;
+		g_toggleGroupTimedTriggerKeySlotEditing = -1;
+		g_keyCollector.clear();
+	}
+
+	g_toggleGroupIdTimedSuppressionKeyEditing = groupEditing.getId();
+	g_toggleGroupTimedSuppressionKeySlotEditing = slotIndex;
 }
 
 void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
@@ -1329,12 +1350,13 @@ static void showHelpMarker(const char* desc)
 		ImGui::EndTooltip();
 	}
 }
-
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
 	applyModernUiStyle();
 
-	if (g_toggleGroupIdKeyBindingEditing >= 0 || g_toggleGroupIdTimedTriggerKeyEditing >= 0)
+	if (g_toggleGroupIdKeyBindingEditing >= 0 ||
+		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
+		g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
 	{
 		g_keyCollector.collectKeysPressed(runtime);
 	}
@@ -1435,6 +1457,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::Separator();
 
 		std::vector<int> idsToRemove;
+		int idToDuplicate = -1;
 
 		for (auto& group : g_toggleGroups)
 		{
@@ -1458,8 +1481,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			if (ImGui::Button("Duplicate"))
 			{
-				g_toggleGroups.push_back(group.makeDuplicate());
-				saveShaderTogglerIniFile();
+				idToDuplicate = group.getId();
 			}
 
 			ImGui::SameLine();
@@ -1497,11 +1519,11 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text(group.isTimedModeInverted() ? " Auto-show " : " Auto-hide ");
 				ImGui::PopStyleColor();
 
-				if (g_groupTimedFadeOutStart.find(group.getId()) != g_groupTimedFadeOutStart.end())
+				if (group.hasTimedSuppressionKeys())
 				{
 					ImGui::SameLine();
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.65f, 0.30f, 1.0f));
-					ImGui::Text(" Fade-out ");
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.55f, 0.35f, 1.0f));
+					ImGui::Text(" Suppression ");
 					ImGui::PopStyleColor();
 				}
 			}
@@ -1698,6 +1720,113 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				}
 				ImGui::PopItemWidth();
 
+				ImGui::Text("Timed suppression keys");
+				ImGui::SameLine();
+				showHelpMarker("These keys prevent timed mode from activating while held. Useful for combo inputs like RT + Y / RT + B where the base trigger should be ignored.");
+
+				for (size_t suppressionIndex = 0; suppressionIndex < group.getTimedSuppressionKeyCount(); ++suppressionIndex)
+				{
+					ImGui::PushID(static_cast<int>(10000 + suppressionIndex));
+
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+
+					std::string suppressionTextBoxContents =
+						(g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+						 g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
+							? g_keyCollector.getKeyAsString()
+							: group.getTimedSuppressionKeyAsString(suppressionIndex);
+
+					char suppressionBuf[128] = {};
+					strncpy_s(suppressionBuf, sizeof(suppressionBuf), suppressionTextBoxContents.c_str(), _TRUNCATE);
+					ImGui::InputText("##TimedSuppression", suppressionBuf, sizeof(suppressionBuf), ImGuiInputTextFlags_ReadOnly);
+
+					if (ImGui::IsItemClicked())
+					{
+						startTimedSuppressionKeyBindingEditing(group, static_cast<int>(suppressionIndex));
+					}
+
+					if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+						g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
+					{
+						isKeyEditing = true;
+						ImGui::SameLine();
+						if (ImGui::Button("OK##TimedSuppression"))
+						{
+							endTimedSuppressionKeyBindingEditing(true, group);
+						}
+						ImGui::SameLine();
+						if (ImGui::Button("Cancel##TimedSuppression"))
+						{
+							endTimedSuppressionKeyBindingEditing(false, group);
+						}
+					}
+
+					ImGui::SameLine();
+					if (ImGui::Button("Remove##TimedSuppression"))
+					{
+						group.removeTimedSuppressionKeyAt(suppressionIndex);
+
+						if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId())
+						{
+							if (g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(suppressionIndex))
+							{
+								g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+								g_toggleGroupTimedSuppressionKeySlotEditing = -1;
+								g_keyCollector.clear();
+							}
+							else if (g_toggleGroupTimedSuppressionKeySlotEditing > static_cast<int>(suppressionIndex))
+							{
+								--g_toggleGroupTimedSuppressionKeySlotEditing;
+							}
+						}
+
+						ImGui::PopItemWidth();
+						ImGui::PopID();
+						break;
+					}
+
+					ImGui::PopItemWidth();
+					ImGui::PopID();
+				}
+
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
+				ImGui::Text(" ");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+
+				std::string addSuppressionText =
+					(g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+					 g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(group.getTimedSuppressionKeyCount()))
+						? g_keyCollector.getKeyAsString()
+						: std::string("Add suppression key");
+
+				char addSuppressionBuf[128] = {};
+				strncpy_s(addSuppressionBuf, sizeof(addSuppressionBuf), addSuppressionText.c_str(), _TRUNCATE);
+				ImGui::InputText("##AddTimedSuppression", addSuppressionBuf, sizeof(addSuppressionBuf), ImGuiInputTextFlags_ReadOnly);
+
+				if (ImGui::IsItemClicked())
+				{
+					startTimedSuppressionKeyBindingEditing(group, static_cast<int>(group.getTimedSuppressionKeyCount()));
+				}
+
+				if (g_toggleGroupIdTimedSuppressionKeyEditing == group.getId() &&
+					g_toggleGroupTimedSuppressionKeySlotEditing == static_cast<int>(group.getTimedSuppressionKeyCount()))
+				{
+					isKeyEditing = true;
+					ImGui::SameLine();
+					if (ImGui::Button("OK##AddTimedSuppression"))
+					{
+						endTimedSuppressionKeyBindingEditing(true, group);
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Cancel##AddTimedSuppression"))
+					{
+						endTimedSuppressionKeyBindingEditing(false, group);
+					}
+				}
+				ImGui::PopItemWidth();
+
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
@@ -1740,7 +1869,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setTimedMode(timedMode);
 				}
 				ImGui::SameLine();
-				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used.");
+				showHelpMarker("Timed mode temporarily switches the group state when a trigger key is used. Suppression keys can prevent this during combo inputs.");
 				ImGui::PopItemWidth();
 
 				if (group.isTimedMode())
@@ -1792,33 +1921,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					ImGui::PopItemWidth();
 				}
 
-
-				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
-				ImGui::Text(" ");
-				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				bool reactiveEnabled = group.isReactiveTriggerEnabled();
-				if (ImGui::Checkbox("Reactive gameplay trigger", &reactiveEnabled))
-				{
-					group.setReactiveTriggerEnabled(reactiveEnabled);
-				}
-				ImGui::SameLine();
-				showHelpMarker("Automatically switches this group while a watcher shader is detected in the current frame. Useful for cutscene/conversation effects such as temporary DOF control.");
-				ImGui::PopItemWidth();
-
-				if (group.isReactiveTriggerEnabled())
-				{
-					int reactiveMode = ToggleGroup::reactiveTriggerModeToInt(group.getReactiveTriggerMode());
-					const char* reactiveModeItems[] = { "Disabled", "Activate while present", "Deactivate while present" };
-					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.45f);
-					ImGui::Text("Reactive mode");
-					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-					if (ImGui::Combo("##ReactiveTriggerMode", &reactiveMode, reactiveModeItems, IM_ARRAYSIZE(reactiveModeItems)))
-					{
-						group.setReactiveTriggerMode(ToggleGroup::reactiveTriggerModeFromInt(reactiveMode));
-					}
-					ImGui::PopItemWidth();
-				}
-
 				if (!isKeyEditing)
 				{
 					if (ImGui::Button("OK"))
@@ -1827,6 +1929,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 						g_toggleGroupIdKeyBindingEditing = -1;
 						g_toggleGroupIdTimedTriggerKeyEditing = -1;
 						g_toggleGroupTimedTriggerKeySlotEditing = -1;
+						g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+						g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 						g_keyCollector.clear();
 						saveShaderTogglerIniFile();
 					}
@@ -1837,11 +1941,35 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::PopID();
 		}
 
+		if (idToDuplicate >= 0)
+		{
+			ToggleGroup duplicate("", ToggleGroup::getNewGroupId());
+			bool hasDuplicate = false;
+
+			for (const auto& group : g_toggleGroups)
+			{
+				if (group.getId() == idToDuplicate)
+				{
+					duplicate = group.makeDuplicate();
+					hasDuplicate = true;
+					break;
+				}
+			}
+
+			if (hasDuplicate)
+			{
+				g_toggleGroups.push_back(duplicate);
+				saveShaderTogglerIniFile();
+			}
+		}
+
 		if (!idsToRemove.empty())
 		{
 			g_toggleGroupIdKeyBindingEditing = -1;
 			g_toggleGroupIdTimedTriggerKeyEditing = -1;
 			g_toggleGroupTimedTriggerKeySlotEditing = -1;
+			g_toggleGroupIdTimedSuppressionKeyEditing = -1;
+			g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 			g_keyCollector.clear();
 			g_toggleGroupIdShaderEditing = -1;
 			g_pixelShaderManager.stopHuntingMode();
@@ -1863,10 +1991,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				g_groupLastTimedTriggerTime.erase(id);
 				g_groupTimedVisibleSince.erase(id);
 				g_groupTimedFadeOutStart.erase(id);
-			g_reactivePresentFrames.erase(id);
-			g_reactiveAbsentFrames.erase(id);
-			g_reactivePreviousState.erase(id);
-			g_reactiveHasPreviousState.erase(id);
 			}
 
 			saveShaderTogglerIniFile();
@@ -1886,26 +2010,30 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	{
 		ImGui::TextUnformatted("Drag and drop to reorder toggle groups");
 		ImGui::SameLine();
-		showHelpMarker("Manual ordering is preserved unless one of the sort buttons is used.");
+		showHelpMarker("Manual ordering is preserved unless a sort button is used.");
 
-		if (ImGui::Button("Sort by hotkeys"))
+		if (ImGui::Button("Sort by hotkey layout"))
 		{
-			sortToggleGroupsByHotkeyLayout();
+			sortToggleGroupsByHotkey();
 		}
 		ImGui::SameLine();
-		showHelpMarker("Sorts groups by the Gametism hotkey layout: End, numpad operators, Backspace/Page keys, arrows, Numpad 7/8/9/0/decimal, Insert/Delete.");
+		showHelpMarker("Sorts groups in the Gametism layout order: End, Numpad / * - +, Backspace/Page keys, arrows, Numpad 7/8/9/0/Decimal, Insert/Delete.");
 
 		ImGui::SameLine();
-		if (ImGui::Button("Sort A - Z"))
+		if (ImGui::Button("Sort A-Z"))
 		{
 			sortToggleGroupsByNameAZ();
 		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups alphabetically by name, ignoring letter case.");
 
 		ImGui::SameLine();
 		if (ImGui::Button("Sort by name length"))
 		{
 			sortToggleGroupsByNameLength();
 		}
+		ImGui::SameLine();
+		showHelpMarker("Sorts groups from shortest name to longest name. Groups with the same name length are sorted alphabetically.");
 
 		ImGui::Separator();
 

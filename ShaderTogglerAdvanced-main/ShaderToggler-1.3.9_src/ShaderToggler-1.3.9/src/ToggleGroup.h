@@ -9,7 +9,6 @@
 
 namespace ShaderToggler
 {
-	//
 	static constexpr const char* STA_TOGGLEGROUP_OWNER_TAG = "Gametism::ToggleGroup::Official";
 	static constexpr const char* STA_TOGGLEGROUP_AUTHOR_TAG = "Sven 'Gametism' Koenigsmann";
 	static constexpr const char* STA_TOGGLEGROUP_PROJECT_TAG = "ShaderToggler Advanced";
@@ -31,13 +30,6 @@ namespace ShaderToggler
 		{
 			KeyData key;
 			TimedTriggerMode mode = TimedTriggerMode::OnPress;
-		};
-
-		enum class ReactiveTriggerMode
-		{
-			Disabled = 0,
-			ActivateWhilePresent = 1,
-			DeactivateWhilePresent = 2
 		};
 
 		ToggleGroup(const std::string& name, GroupId id);
@@ -100,29 +92,19 @@ namespace ShaderToggler
 		const TimedTriggerBinding& getTimedTriggerBindingAt(size_t index) const;
 		const std::vector<TimedTriggerBinding>& getTimedTriggerKeys() const;
 
+		void addTimedSuppressionKey(const KeyData& key);
+		void setTimedSuppressionKeyAt(size_t index, const KeyData& key);
+		void removeTimedSuppressionKeyAt(size_t index);
+		void clearTimedSuppressionKeys();
+		bool hasTimedSuppressionKeys() const;
+		size_t getTimedSuppressionKeyCount() const;
+		const KeyData& getTimedSuppressionKeyAt(size_t index) const;
+		std::string getTimedSuppressionKeyAsString(size_t index) const;
+		const std::vector<KeyData>& getTimedSuppressionKeys() const;
+
 		static const char* timedTriggerModeToString(TimedTriggerMode mode);
 		static int timedTriggerModeToInt(TimedTriggerMode mode);
 		static TimedTriggerMode timedTriggerModeFromInt(int value);
-
-		bool isReactiveTriggerEnabled() const;
-		void setReactiveTriggerEnabled(bool enabled);
-
-		ReactiveTriggerMode getReactiveTriggerMode() const;
-		void setReactiveTriggerMode(ReactiveTriggerMode mode);
-
-		static const char* reactiveTriggerModeToString(ReactiveTriggerMode mode);
-		static int reactiveTriggerModeToInt(ReactiveTriggerMode mode);
-		static ReactiveTriggerMode reactiveTriggerModeFromInt(int value);
-
-		void clearReactiveWatcherHashes();
-		void storeReactiveWatcherHashes(
-			const std::unordered_set<uint32_t>& pixel,
-			const std::unordered_set<uint32_t>& vertex,
-			const std::unordered_set<uint32_t>& compute);
-
-		const std::unordered_set<uint32_t>& getReactivePixelShaderHashes() const;
-		const std::unordered_set<uint32_t>& getReactiveVertexShaderHashes() const;
-		const std::unordered_set<uint32_t>& getReactiveComputeShaderHashes() const;
 
 		void clearHashes();
 		void storeCollectedHashes(
@@ -139,7 +121,6 @@ namespace ShaderToggler
 
 		ToggleGroup makeDuplicate() const;
 
-		// Harmless provenance accessors for diagnostics/ownership continuity.
 		static constexpr const char* getProvenanceOwnerTag() { return STA_TOGGLEGROUP_OWNER_TAG; }
 		static constexpr const char* getProvenanceAuthorTag() { return STA_TOGGLEGROUP_AUTHOR_TAG; }
 		static constexpr const char* getProvenanceProjectTag() { return STA_TOGGLEGROUP_PROJECT_TAG; }
@@ -160,15 +141,10 @@ namespace ShaderToggler
 		int m_timedModeFadeOutMs;
 		KeyData m_toggleKey;
 		std::vector<TimedTriggerBinding> m_timedTriggerKeys;
+		std::vector<KeyData> m_timedSuppressionKeys;
 
 		std::unordered_set<uint32_t> m_pixelShaderHashes;
 		std::unordered_set<uint32_t> m_vertexShaderHashes;
 		std::unordered_set<uint32_t> m_computeShaderHashes;
-
-		bool m_reactiveTriggerEnabled;
-		ReactiveTriggerMode m_reactiveTriggerMode;
-		std::unordered_set<uint32_t> m_reactivePixelShaderHashes;
-		std::unordered_set<uint32_t> m_reactiveVertexShaderHashes;
-		std::unordered_set<uint32_t> m_reactiveComputeShaderHashes;
 	};
 }

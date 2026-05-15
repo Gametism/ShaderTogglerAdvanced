@@ -2,17 +2,15 @@
 #include "CDataFile.h"
 #include <sstream>
 #include <vector>
-//GT
+
 namespace ShaderToggler
 {
 	namespace
 	{
-		//
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_A = "STA::TG::Gametism";
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_B = "STA::TG::SvenKoenigsmann";
 		static constexpr const char* STA_TOGGLEGROUP_UNIT_TAG_C = "STA::TG::ShaderTogglerAdvanced";
 
-		//
 		static inline const char* preserve_togglegroup_provenance()
 		{
 			return STA_TOGGLEGROUP_UNIT_TAG_A;
@@ -34,8 +32,6 @@ namespace ShaderToggler
 		, m_timedModeDelayMs(1500)
 		, m_timedModeMinVisibleMs(250)
 		, m_timedModeFadeOutMs(150)
-		, m_reactiveTriggerEnabled(false)
-		, m_reactiveTriggerMode(ReactiveTriggerMode::Disabled)
 	{
 		(void)preserve_togglegroup_provenance();
 	}
@@ -125,7 +121,7 @@ namespace ShaderToggler
 
 		m_timedModeFadeOutMs = fadeOutMs;
 	}
-//GT
+
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
 	{
 		m_toggleKey.setKey(newKeyValue, shiftRequired, altRequired, ctrlRequired);
@@ -204,9 +200,6 @@ namespace ShaderToggler
 	void ToggleGroup::clearTimedTriggerKeys()
 	{
 		m_timedTriggerKeys.clear();
-		m_reactiveTriggerEnabled = false;
-		m_reactiveTriggerMode = ReactiveTriggerMode::Disabled;
-		clearReactiveWatcherHashes();
 	}
 
 	bool ToggleGroup::hasTimedTriggerKeys() const
@@ -244,6 +237,67 @@ namespace ShaderToggler
 		return m_timedTriggerKeys;
 	}
 
+	void ToggleGroup::addTimedSuppressionKey(const KeyData& key)
+	{
+		if (!key.isValid())
+			return;
+
+		m_timedSuppressionKeys.push_back(key);
+	}
+
+	void ToggleGroup::setTimedSuppressionKeyAt(size_t index, const KeyData& key)
+	{
+		if (!key.isValid())
+			return;
+
+		if (index < m_timedSuppressionKeys.size())
+		{
+			m_timedSuppressionKeys[index] = key;
+		}
+		else if (index == m_timedSuppressionKeys.size())
+		{
+			addTimedSuppressionKey(key);
+		}
+	}
+
+	void ToggleGroup::removeTimedSuppressionKeyAt(size_t index)
+	{
+		if (index >= m_timedSuppressionKeys.size())
+			return;
+
+		m_timedSuppressionKeys.erase(m_timedSuppressionKeys.begin() + static_cast<std::ptrdiff_t>(index));
+	}
+
+	void ToggleGroup::clearTimedSuppressionKeys()
+	{
+		m_timedSuppressionKeys.clear();
+	}
+
+	bool ToggleGroup::hasTimedSuppressionKeys() const
+	{
+		return !m_timedSuppressionKeys.empty();
+	}
+
+	size_t ToggleGroup::getTimedSuppressionKeyCount() const
+	{
+		return m_timedSuppressionKeys.size();
+	}
+
+	const KeyData& ToggleGroup::getTimedSuppressionKeyAt(size_t index) const
+	{
+		return m_timedSuppressionKeys.at(index);
+	}
+
+	std::string ToggleGroup::getTimedSuppressionKeyAsString(size_t index) const
+	{
+		return m_timedSuppressionKeys.at(index).toString();
+	}
+
+	const std::vector<KeyData>& ToggleGroup::getTimedSuppressionKeys() const
+	{
+		return m_timedSuppressionKeys;
+	}
+
 	const char* ToggleGroup::timedTriggerModeToString(TimedTriggerMode mode)
 	{
 		switch (mode)
@@ -278,93 +332,13 @@ namespace ShaderToggler
 		}
 	}
 
-//GT
-	bool ToggleGroup::isReactiveTriggerEnabled() const
-	{
-		return m_reactiveTriggerEnabled;
-	}
-
-	void ToggleGroup::setReactiveTriggerEnabled(bool enabled)
-	{
-		m_reactiveTriggerEnabled = enabled;
-		if (!enabled)
-			m_reactiveTriggerMode = ReactiveTriggerMode::Disabled;
-		else if (m_reactiveTriggerMode == ReactiveTriggerMode::Disabled)
-			m_reactiveTriggerMode = ReactiveTriggerMode::ActivateWhilePresent;
-	}
-
-	ToggleGroup::ReactiveTriggerMode ToggleGroup::getReactiveTriggerMode() const
-	{
-		return m_reactiveTriggerMode;
-	}
-
-	void ToggleGroup::setReactiveTriggerMode(ReactiveTriggerMode mode)
-	{
-		m_reactiveTriggerMode = mode;
-		m_reactiveTriggerEnabled = (mode != ReactiveTriggerMode::Disabled);
-	}
-
-	const char* ToggleGroup::reactiveTriggerModeToString(ReactiveTriggerMode mode)
-	{
-		switch (mode)
-		{
-		case ReactiveTriggerMode::ActivateWhilePresent:
-			return "Activate while watcher is present";
-		case ReactiveTriggerMode::DeactivateWhilePresent:
-			return "Deactivate while watcher is present";
-		case ReactiveTriggerMode::Disabled:
-		default:
-			return "Disabled";
-		}
-	}
-
-	int ToggleGroup::reactiveTriggerModeToInt(ReactiveTriggerMode mode)
-	{
-		return static_cast<int>(mode);
-	}
-
-	ToggleGroup::ReactiveTriggerMode ToggleGroup::reactiveTriggerModeFromInt(int value)
-	{
-		switch (value)
-		{
-		case 1:
-			return ReactiveTriggerMode::ActivateWhilePresent;
-		case 2:
-			return ReactiveTriggerMode::DeactivateWhilePresent;
-		case 0:
-		default:
-			return ReactiveTriggerMode::Disabled;
-		}
-	}
-
-	void ToggleGroup::clearReactiveWatcherHashes()
-	{
-		m_reactivePixelShaderHashes.clear();
-		m_reactiveVertexShaderHashes.clear();
-		m_reactiveComputeShaderHashes.clear();
-	}
-
-	void ToggleGroup::storeReactiveWatcherHashes(
-		const std::unordered_set<uint32_t>& pixel,
-		const std::unordered_set<uint32_t>& vertex,
-		const std::unordered_set<uint32_t>& compute)
-	{
-		m_reactivePixelShaderHashes = pixel;
-		m_reactiveVertexShaderHashes = vertex;
-		m_reactiveComputeShaderHashes = compute;
-	}
-
-	const std::unordered_set<uint32_t>& ToggleGroup::getReactivePixelShaderHashes() const { return m_reactivePixelShaderHashes; }
-	const std::unordered_set<uint32_t>& ToggleGroup::getReactiveVertexShaderHashes() const { return m_reactiveVertexShaderHashes; }
-	const std::unordered_set<uint32_t>& ToggleGroup::getReactiveComputeShaderHashes() const { return m_reactiveComputeShaderHashes; }
-
 	void ToggleGroup::clearHashes()
 	{
 		m_pixelShaderHashes.clear();
 		m_vertexShaderHashes.clear();
 		m_computeShaderHashes.clear();
 	}
-//GT
+
 	void ToggleGroup::storeCollectedHashes(
 		const std::unordered_set<uint32_t>& pixel,
 		const std::unordered_set<uint32_t>& vertex,
@@ -388,7 +362,7 @@ namespace ShaderToggler
 		copy.m_editing = false;
 		return copy;
 	}
-//GT
+
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
@@ -400,6 +374,7 @@ namespace ShaderToggler
 		m_timedModeMinVisibleMs = 250;
 		m_timedModeFadeOutMs = 150;
 		m_timedTriggerKeys.clear();
+		m_timedSuppressionKeys.clear();
 
 		if (index < 0)
 		{
@@ -438,20 +413,15 @@ namespace ShaderToggler
 			m_timedModeFadeOutMs = 150;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			m_timedTriggerKeys.clear();
-			m_reactiveTriggerEnabled = false;
-			m_reactiveTriggerMode = ReactiveTriggerMode::Disabled;
-			clearReactiveWatcherHashes();
+			m_timedSuppressionKeys.clear();
 			return;
 		}
-//GT
+
 		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
 		const std::string sectionRoot = prefix + std::to_string(index);
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
-		const std::string reactivePixelHashesCategory = sectionRoot + "_ReactiveWatcherPixelShaders";
-		const std::string reactiveVertexHashesCategory = sectionRoot + "_ReactiveWatcherVertexShaders";
-		const std::string reactiveComputeHashesCategory = sectionRoot + "_ReactiveWatcherComputeShaders";
 
 		int amountShaders = iniFile.GetInt("AmountHashes", vertexHashesCategory);
 		for (int i = 0; i < amountShaders; i++)
@@ -468,47 +438,13 @@ namespace ShaderToggler
 			if (hash != UINT_MAX)
 				m_pixelShaderHashes.insert(hash);
 		}
-//GT
+
 		amountShaders = iniFile.GetInt("AmountHashes", computeHashesCategory);
 		for (int i = 0; i < amountShaders; i++)
 		{
 			uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), computeHashesCategory);
 			if (hash != UINT_MAX)
 				m_computeShaderHashes.insert(hash);
-		}
-
-
-		amountShaders = iniFile.GetInt("AmountHashes", reactiveVertexHashesCategory);
-		if (amountShaders != INT_MIN)
-		{
-			for (int i = 0; i < amountShaders; i++)
-			{
-				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), reactiveVertexHashesCategory);
-				if (hash != UINT_MAX)
-					m_reactiveVertexShaderHashes.insert(hash);
-			}
-		}
-
-		amountShaders = iniFile.GetInt("AmountHashes", reactivePixelHashesCategory);
-		if (amountShaders != INT_MIN)
-		{
-			for (int i = 0; i < amountShaders; i++)
-			{
-				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), reactivePixelHashesCategory);
-				if (hash != UINT_MAX)
-					m_reactivePixelShaderHashes.insert(hash);
-			}
-		}
-
-		amountShaders = iniFile.GetInt("AmountHashes", reactiveComputeHashesCategory);
-		if (amountShaders != INT_MIN)
-		{
-			for (int i = 0; i < amountShaders; i++)
-			{
-				uint32_t hash = iniFile.GetUInt("ShaderHash" + std::to_string(i), reactiveComputeHashesCategory);
-				if (hash != UINT_MAX)
-					m_reactiveComputeShaderHashes.insert(hash);
-			}
 		}
 
 		m_name = iniFile.GetValue("Name", sectionRoot);
@@ -550,6 +486,14 @@ namespace ShaderToggler
 			}
 		}
 
+		const std::vector<uint32_t> timedSuppressionKeyValues = iniFile.GetArray("TimedSuppressionKeys", sectionRoot);
+		for (const uint32_t keyValue : timedSuppressionKeyValues)
+		{
+			KeyData key = KeyData::fromInt(keyValue);
+			if (key.isValid())
+				addTimedSuppressionKey(key);
+		}
+
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
 
@@ -576,24 +520,6 @@ namespace ShaderToggler
 			m_timedModeInverted = iniFile.GetBool("TimedModeInverted", sectionRoot);
 		else
 			m_timedModeInverted = false;
-
-
-		const std::string reactiveEnabledValue = iniFile.GetValue("ReactiveTriggerEnabled", sectionRoot);
-		if (!reactiveEnabledValue.empty())
-			m_reactiveTriggerEnabled = iniFile.GetBool("ReactiveTriggerEnabled", sectionRoot);
-		else
-			m_reactiveTriggerEnabled = false;
-
-		const int reactiveModeValue = iniFile.GetInt("ReactiveTriggerMode", sectionRoot);
-		if (reactiveModeValue != INT_MIN)
-			m_reactiveTriggerMode = reactiveTriggerModeFromInt(reactiveModeValue);
-		else
-			m_reactiveTriggerMode = ReactiveTriggerMode::Disabled;
-
-		if (m_reactiveTriggerMode != ReactiveTriggerMode::Disabled)
-			m_reactiveTriggerEnabled = true;
-		if (!m_reactiveTriggerEnabled)
-			m_reactiveTriggerMode = ReactiveTriggerMode::Disabled;
 
 		const int timedDelayValue = iniFile.GetInt("TimedModeDelayMs", sectionRoot);
 		if (timedDelayValue != INT_MIN)
@@ -622,7 +548,7 @@ namespace ShaderToggler
 			m_holdInverted = false;
 		}
 	}
-//GT 
+
 	void ToggleGroup::saveState(CDataFile& iniFile, int index, bool usingCustomFormat) const
 	{
 		const std::string prefix = usingCustomFormat ? "GTGroup" : "Group";
@@ -630,9 +556,6 @@ namespace ShaderToggler
 		const std::string vertexHashesCategory = sectionRoot + "_VertexShaders";
 		const std::string pixelHashesCategory = sectionRoot + "_PixelShaders";
 		const std::string computeHashesCategory = sectionRoot + "_ComputeShaders";
-		const std::string reactivePixelHashesCategory = sectionRoot + "_ReactiveWatcherPixelShaders";
-		const std::string reactiveVertexHashesCategory = sectionRoot + "_ReactiveWatcherVertexShaders";
-		const std::string reactiveComputeHashesCategory = sectionRoot + "_ReactiveWatcherComputeShaders";
 
 		int counter = 0;
 		for (const auto hash : m_vertexShaderHashes)
@@ -658,30 +581,6 @@ namespace ShaderToggler
 		}
 		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
 
-		counter = 0;
-		for (const auto hash : m_reactiveVertexShaderHashes)
-		{
-			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", reactiveVertexHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", reactiveVertexHashesCategory);
-
-		counter = 0;
-		for (const auto hash : m_reactivePixelShaderHashes)
-		{
-			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", reactivePixelHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", reactivePixelHashesCategory);
-
-		counter = 0;
-		for (const auto hash : m_reactiveComputeShaderHashes)
-		{
-			iniFile.SetUInt("ShaderHash" + std::to_string(counter), hash, "", reactiveComputeHashesCategory);
-			counter++;
-		}
-		iniFile.SetUInt("AmountHashes", counter, "", reactiveComputeHashesCategory);
-
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 
@@ -706,6 +605,20 @@ namespace ShaderToggler
 			iniFile.SetArray("TimedTriggerModes", timedTriggerModeValues, "", sectionRoot);
 		}
 
+		if (!m_timedSuppressionKeys.empty())
+		{
+			std::vector<uint32_t> timedSuppressionKeyValues;
+			timedSuppressionKeyValues.reserve(m_timedSuppressionKeys.size());
+
+			for (const KeyData& key : m_timedSuppressionKeys)
+			{
+				if (key.isValid())
+					timedSuppressionKeyValues.push_back(static_cast<uint32_t>(key.toInt()));
+			}
+
+			iniFile.SetArray("TimedSuppressionKeys", timedSuppressionKeyValues, "", sectionRoot);
+		}
+
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
@@ -714,8 +627,5 @@ namespace ShaderToggler
 		iniFile.SetInt("TimedModeDelayMs", m_timedModeDelayMs, "", sectionRoot);
 		iniFile.SetInt("TimedModeMinVisibleMs", m_timedModeMinVisibleMs, "", sectionRoot);
 		iniFile.SetInt("TimedModeFadeOutMs", m_timedModeFadeOutMs, "", sectionRoot);
-		iniFile.SetBool("ReactiveTriggerEnabled", m_reactiveTriggerEnabled, "", sectionRoot);
-		iniFile.SetInt("ReactiveTriggerMode", reactiveTriggerModeToInt(m_reactiveTriggerMode), "", sectionRoot);
 	}
 }
-//GT

@@ -113,6 +113,7 @@ static const int g_drawFingerprintNearbyWindow = 6;
 static std::mutex g_drawFingerprintMutex;
 static std::atomic_uint32_t g_presentFrameCounter = 0;
 static std::atomic_bool g_drawFingerprintHuntActive = false;
+static std::atomic_bool g_drawFingerprintsDisabledForD3D12 = false;
 static const uint32_t g_drawFingerprintWarmupPresentFrames = 8;
 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
@@ -748,8 +749,14 @@ static void onResetCommandList(command_list *commandList)
 	commandListData.drawCallCounter = 0;
 }
 
-static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
+static void onInitPipeline(device *device, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
+	if (device != nullptr && device->get_api() == device_api::d3d12)
+	{
+		g_drawFingerprintsDisabledForD3D12 = true;
+		g_drawFingerprintHuntActive = false;
+	}
+
 	if (pipelineHandle.handle == 0 || subobjects == nullptr || subobjectCount == 0)
 		return;
 
@@ -1076,11 +1083,17 @@ static void markNearbyDrawFingerprintsForActiveShaderSet()
 
 static bool hasStablePresentForDrawFingerprints()
 {
+	if (g_drawFingerprintsDisabledForD3D12.load())
+		return false;
+
 	return g_presentFrameCounter.load() >= g_drawFingerprintWarmupPresentFrames;
 }
 
 static bool hasAnyActiveGroupDrawFingerprints()
 {
+	if (g_drawFingerprintsDisabledForD3D12.load())
+		return false;
+
 	for (const auto& group : g_toggleGroups)
 	{
 		if (group.isActive() && group.hasDrawFingerprints())

@@ -524,7 +524,7 @@ namespace ShaderToggler
 
 		const std::vector<uint32_t> drawFingerprintLowValues = iniFile.GetArray("DrawFingerprintLow", sectionRoot);
 		const std::vector<uint32_t> drawFingerprintHighValues = iniFile.GetArray("DrawFingerprintHigh", sectionRoot);
-		const size_t drawFingerprintCount = std::min(drawFingerprintLowValues.size(), drawFingerprintHighValues.size());
+		const size_t drawFingerprintCount = (drawFingerprintLowValues.size() < drawFingerprintHighValues.size()) ? drawFingerprintLowValues.size() : drawFingerprintHighValues.size();
 		for (size_t i = 0; i < drawFingerprintCount; ++i)
 		{
 			const uint64_t value =

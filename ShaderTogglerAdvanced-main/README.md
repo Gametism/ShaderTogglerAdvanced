@@ -22,7 +22,6 @@ This version adds:
 - improved shader detection behavior for DXVK and RenoDX (DX9)
 - sorting functions
 - **timed suppression keys for timed groups**
-- **draw-call fingerprint based blocking**
 
 ---
 
@@ -642,54 +641,6 @@ This writes the configuration to:
 `ShaderToggler.ini`
 
 The file is stored in the same folder as the add-on.
-
----
-
-## Fingerprint hunting
-
-Fingerprint hunting is designed mainly for:
-
-HUD elements
-prompts
-text overlays
-interaction icons
-UI backgrounds
-difficult modern interfaces
-How it works
-
-Start fingerprint hunting from a toggle group.
-
-The system collects visible draw-call fingerprints from recent frames and lets you cycle through them individually.
-
-When cycling:
-
-- matching UI elements disappear temporarily
-- allowing you to identify the correct fingerprint
-
-Once identified:
-
-mark the fingerprint
-it becomes part of the current toggle group
-
-Marked fingerprints are highlighted in yellow in the overlay.
-
-Fingerprint hunting controls
-
-### Fingerprint browsing
-
-Numpad 0 = previous fingerprint
-Numpad Decimal = next fingerprint
-Numpad + = mark / unmark current fingerprint
-
-### Marked fingerprint browsing
-
-Ctrl + Numpad 0 / Numpad Decimal = previous / next marked fingerprint
-
-Accelerated holding
-
-Holding fingerprint browsing keys speeds up scrolling automatically over time.
-
-This makes large HUD fingerprint sets much faster to navigate.
 
 ---
 

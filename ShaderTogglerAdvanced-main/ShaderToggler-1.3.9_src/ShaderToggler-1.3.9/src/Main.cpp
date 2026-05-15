@@ -1110,15 +1110,15 @@ bool blockDrawCallForCommandList(command_list* commandList, uint32_t drawKind, u
 		if (!group.isActive())
 			continue;
 
-		if (group.hasDrawFingerprints())
+		// Draw fingerprints are an additional narrow filter, not a replacement for
+		// normal shader-hash blocking. This allows one group to contain both:
+		// - regular marked pixel/vertex/compute shaders
+		// - specific HUD draw fingerprints
+		if (group.hasDrawFingerprints() &&
+			group.getDrawFingerprints().count(drawFingerprint) == 1)
 		{
-			if (group.getDrawFingerprints().count(drawFingerprint) == 1)
-			{
-				blockCall = true;
-				break;
-			}
-
-			continue;
+			blockCall = true;
+			break;
 		}
 
 		if (groupContainsShaderHash(group, pixelHash, vertexHash, computeHash))

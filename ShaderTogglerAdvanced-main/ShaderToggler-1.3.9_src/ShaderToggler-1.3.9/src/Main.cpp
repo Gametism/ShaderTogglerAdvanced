@@ -466,6 +466,37 @@ static uint32_t calculateShaderHash(void* shaderData)
 	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
 }
 
+
+static uint32_t calculateFallbackPipelineHash(pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
+{
+	std::string data;
+	data += "STA_FALLBACK_SHADER|";
+	data += std::to_string(static_cast<unsigned long long>(pipelineHandle.handle));
+	data += "|";
+	data += std::to_string(static_cast<int>(type));
+	data += "|";
+	data += std::to_string(subobjectIndex);
+
+	const uint64_t hash64 = fnv1a64(data);
+	uint32_t hash32 = static_cast<uint32_t>(hash64 ^ (hash64 >> 32));
+
+	if (hash32 == 0)
+		hash32 = 1;
+
+	return hash32;
+}
+
+static uint32_t calculateShaderHashWithFallback(void* shaderData, pipeline pipelineHandle, pipeline_subobject_type type, uint32_t subobjectIndex)
+{
+	const uint32_t realHash = calculateShaderHash(shaderData);
+
+	if (realHash != 0)
+		return realHash;
+
+	return calculateFallbackPipelineHash(pipelineHandle, type, subobjectIndex);
+}
+
+
 static void applyModernUiStyle()
 {
 	if (g_uiStyleInitialized)
@@ -649,19 +680,31 @@ static void onResetCommandList(command_list *commandList)
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
+	if (pipelineHandle.handle == 0 || subobjects == nullptr || subobjectCount == 0)
+		return;
+
 	for (uint32_t i = 0; i < subobjectCount; ++i)
 	{
+		const uint32_t shaderHash = calculateShaderHashWithFallback(
+			subobjects[i].data,
+			pipelineHandle,
+			subobjects[i].type,
+			i);
+
 		switch (subobjects[i].type)
 		{
 		case pipeline_subobject_type::vertex_shader:
-			g_vertexShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			g_vertexShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 			break;
+
 		case pipeline_subobject_type::pixel_shader:
-			g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			g_pixelShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 			break;
+
 		case pipeline_subobject_type::compute_shader:
-			g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+			g_computeShaderManager.addHashHandlePair(shaderHash, pipelineHandle.handle);
 			break;
+
 		default:
 			break;
 		}

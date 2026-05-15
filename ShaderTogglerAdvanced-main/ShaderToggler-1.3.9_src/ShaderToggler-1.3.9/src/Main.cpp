@@ -861,6 +861,15 @@ static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 					g_activeHuntedDrawFingerprintIndex,
 					static_cast<int>(g_collectedDrawFingerprintsOrdered.size()),
 					static_cast<int>(g_markedDrawFingerprints.size()));
+
+				if (g_activeHuntedDrawFingerprint != 0 &&
+					g_markedDrawFingerprints.count(g_activeHuntedDrawFingerprint) == 1)
+				{
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+					ImGui::TextUnformatted("Draw fingerprint is part of this toggle group.");
+					ImGui::PopStyleColor();
+				}
+
 				ImGui::TextUnformatted("Draw HUD hunt: Numpad 0 / Decimal = previous / next, Numpad + = mark, Numpad - = mark nearby/same-shader.");
 			}
 		}

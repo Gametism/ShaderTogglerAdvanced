@@ -34,6 +34,7 @@ namespace ShaderToggler
 		, m_timedModeDelayMs(1500)
 		, m_timedModeMinVisibleMs(250)
 		, m_timedModeFadeOutMs(150)
+		, m_timedSuppressionLingerMs(250)
 	{
 		(void)preserve_togglegroup_provenance();
 	}
@@ -122,6 +123,17 @@ namespace ShaderToggler
 			fadeOutMs = 0;
 
 		m_timedModeFadeOutMs = fadeOutMs;
+	}
+
+	int ToggleGroup::getTimedSuppressionLingerMs() const { return m_timedSuppressionLingerMs; }
+	void ToggleGroup::setTimedSuppressionLingerMs(int lingerMs)
+	{
+		if (lingerMs < 0)
+			lingerMs = 0;
+		if (lingerMs > 2000)
+			lingerMs = 2000;
+
+		m_timedSuppressionLingerMs = lingerMs;
 	}
 //GT
 	void ToggleGroup::setToggleKey(uint8_t newKeyValue, bool shiftRequired, bool altRequired, bool ctrlRequired)
@@ -375,6 +387,7 @@ namespace ShaderToggler
 		m_timedModeDelayMs = 1500;
 		m_timedModeMinVisibleMs = 250;
 		m_timedModeFadeOutMs = 150;
+		m_timedSuppressionLingerMs = 250;
 		m_timedTriggerKeys.clear();
 		m_timedSuppressionKeys.clear();
 
@@ -413,6 +426,7 @@ namespace ShaderToggler
 			m_timedModeDelayMs = 1500;
 			m_timedModeMinVisibleMs = 250;
 			m_timedModeFadeOutMs = 150;
+			m_timedSuppressionLingerMs = 250;
 			m_toggleKey.setKey(VK_CAPITAL, false, false, false);
 			m_timedTriggerKeys.clear();
 			m_timedSuppressionKeys.clear();
@@ -494,6 +508,16 @@ namespace ShaderToggler
 			KeyData key = KeyData::fromInt(keyValue);
 			if (key.isValid())
 				addTimedSuppressionKey(key);
+		}
+
+		const int suppressionLingerValue = iniFile.GetInt("TimedSuppressionLingerMs", sectionRoot);
+		if (suppressionLingerValue != INT_MIN)
+		{
+			setTimedSuppressionLingerMs(suppressionLingerValue);
+		}
+		else
+		{
+			m_timedSuppressionLingerMs = 250;
 		}
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
@@ -629,6 +653,7 @@ namespace ShaderToggler
 		iniFile.SetInt("TimedModeDelayMs", m_timedModeDelayMs, "", sectionRoot);
 		iniFile.SetInt("TimedModeMinVisibleMs", m_timedModeMinVisibleMs, "", sectionRoot);
 		iniFile.SetInt("TimedModeFadeOutMs", m_timedModeFadeOutMs, "", sectionRoot);
+		iniFile.SetInt("TimedSuppressionLingerMs", m_timedSuppressionLingerMs, "", sectionRoot);
 	}
 }
 //GT

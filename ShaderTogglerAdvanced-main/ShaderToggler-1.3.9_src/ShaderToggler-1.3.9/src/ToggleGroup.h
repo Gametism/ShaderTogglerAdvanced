@@ -74,6 +74,9 @@ namespace ShaderToggler
 		int getTimedModeFadeOutMs() const;
 		void setTimedModeFadeOutMs(int fadeOutMs);
 
+		int getTimedSuppressionLingerMs() const;
+		void setTimedSuppressionLingerMs(int lingerMs);
+
 		void setToggleKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		void setToggleKey(const KeyData& key);
 		const KeyData& getToggleKey() const;
@@ -141,6 +144,7 @@ namespace ShaderToggler
 		int m_timedModeDelayMs;
 		int m_timedModeMinVisibleMs;
 		int m_timedModeFadeOutMs;
+		int m_timedSuppressionLingerMs;
 		KeyData m_toggleKey;
 		std::vector<TimedTriggerBinding> m_timedTriggerKeys;
 		std::vector<KeyData> m_timedSuppressionKeys;

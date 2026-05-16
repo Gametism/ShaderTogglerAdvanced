@@ -83,6 +83,7 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupHot
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedTriggerTime;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedVisibleSince;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedSuppressionInputTime;
 static const int g_groupHotkeyDebounceMs = 150;
 
 // 
@@ -399,6 +400,7 @@ static std::string buildIniSignature()
 		}
 
 		data += "|TimedSuppressionCount=" + std::to_string(group.getTimedSuppressionKeyCount());
+		data += "|TimedSuppressionLinger=" + std::to_string(group.getTimedSuppressionLingerMs());
 		for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
 		{
 			data += "|TimedSuppressionKey" + std::to_string(i) + "=" + std::to_string(group.getTimedSuppressionKeyAt(i).toInt());
@@ -890,9 +892,35 @@ static void onReshadePresent(effect_runtime* runtime)
 	for (auto& group : g_toggleGroups)
 	{
 		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
-		const bool timedSuppressedNow = isAnyTimedSuppressionKeyDown(group, runtime);
-		const bool timedTriggerActiveNow = !timedSuppressedNow && isAnyTimedTriggerActive(group, runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
+
+		const bool timedSuppressionKeyDownNow = isAnyTimedSuppressionKeyDown(group, runtime);
+		if (timedSuppressionKeyDownNow)
+		{
+			g_groupLastTimedSuppressionInputTime[group.getId()] = nowTime;
+		}
+
+		bool timedSuppressedNow = timedSuppressionKeyDownNow;
+		if (!timedSuppressedNow)
+		{
+			auto suppressionIt = g_groupLastTimedSuppressionInputTime.find(group.getId());
+			if (suppressionIt != g_groupLastTimedSuppressionInputTime.end())
+			{
+				const auto elapsedSinceSuppressionMs =
+					std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - suppressionIt->second).count();
+
+				if (elapsedSinceSuppressionMs <= group.getTimedSuppressionLingerMs())
+				{
+					timedSuppressedNow = true;
+				}
+				else
+				{
+					g_groupLastTimedSuppressionInputTime.erase(suppressionIt);
+				}
+			}
+		}
+
+		const bool timedTriggerActiveNow = !timedSuppressedNow && isAnyTimedTriggerActive(group, runtime);
 
 		if (group.isTimedMode())
 		{
@@ -1838,6 +1866,18 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				}
 				ImGui::PopItemWidth();
 
+				int suppressionLingerMs = group.getTimedSuppressionLingerMs();
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.4f);
+				ImGui::Text("Suppression linger");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				if (ImGui::SliderInt("##TimedSuppressionLingerMs", &suppressionLingerMs, 0, 1000, "%d ms"))
+				{
+					group.setTimedSuppressionLingerMs(suppressionLingerMs);
+				}
+				ImGui::SameLine();
+				showHelpMarker("Keeps suppression active for a short time after the suppression button is released. This helps with controller triggers that release slightly later than face buttons.");
+				ImGui::PopItemWidth();
+
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
@@ -1980,6 +2020,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				g_groupLastTimedTriggerTime.erase(id);
 				g_groupTimedVisibleSince.erase(id);
 				g_groupTimedFadeOutStart.erase(id);
+				g_groupLastTimedSuppressionInputTime.erase(id);
 			}
 
 			saveShaderTogglerIniFile();

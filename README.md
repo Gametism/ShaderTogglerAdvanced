@@ -296,35 +296,6 @@ This makes controller behavior significantly more reliable.
 
 ---
 
-## Marking shaders
-
-To mark shaders successfully, make sure the element you want to hide is currently visible.
-
-Then click **Hunt Shaders** on the group you want to configure.
-
-ShaderToggler Advanced uses an enhanced shader hunting system that combines:
-- traditional shader hash hunting
-- internal draw fingerprint analysis
-- improved HUD draw detection
-
-This improves detection accuracy for:
-- HUD elements
-- interaction prompts
-- UI backgrounds
-- layered UI widgets
-- DX12 HUD systems
-- Vulkan HUD systems
-- Unreal Engine HUD rendering
-
-Especially for difficult modern games where:
-- many UI elements share the same shader
-- shaders are heavily reused
-- draw calls are batched aggressively
-
-The enhanced detection system works automatically in the background during normal shader hunting.
-
----
-
 ## Shader hunting hotkeys
 
 ### Pixel shaders

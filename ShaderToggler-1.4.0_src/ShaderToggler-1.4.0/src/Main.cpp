@@ -94,6 +94,8 @@ static std::unordered_map<std::string, bool> g_assignedTechniqueLastAppliedState
 static std::unordered_map<int, int> g_groupTechniqueComboIndex;
 static reshade::api::effect_runtime* g_currentRuntime = nullptr;
 static std::atomic_bool g_isInjectingAssignedEffects = false;
+static uint64_t g_effectInjectionFrameCounter = 0;
+static uint64_t g_lastEffectInjectionFrame = static_cast<uint64_t>(-1);
 static uint64_t g_presentFrameCounter = 0;
 static const int g_groupHotkeyDebounceMs = 150;
 
@@ -249,9 +251,12 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 	if (g_isInjectingAssignedEffects)
 		return;
 
-	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
-	if (commandListData.activeRenderTargetView.handle == 0)
+	// Safety: Only attempt one injected ReShade render per frame.
+	// Rendering effects from a draw callback repeatedly is fragile and can crash some games.
+	if (g_lastEffectInjectionFrame == g_effectInjectionFrameCounter)
 		return;
+
+	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
 
 	std::unordered_set<std::string> assignedTechniqueNames;
 
@@ -312,6 +317,7 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 	if (!hasAssignedTechnique)
 		return;
 
+	g_lastEffectInjectionFrame = g_effectInjectionFrameCounter;
 	g_isInjectingAssignedEffects = true;
 
 	for (const auto& backup : backups)
@@ -321,8 +327,8 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 
 	g_currentRuntime->render_effects(
 		commandList,
-		commandListData.activeRenderTargetView,
-		commandListData.activeRenderTargetView);
+		reshade::api::resource_view { 0 },
+		reshade::api::resource_view { 0 });
 
 	for (const auto& backup : backups)
 	{

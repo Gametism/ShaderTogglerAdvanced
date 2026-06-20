@@ -203,18 +203,9 @@ static std::string getTechniqueDisplayKey(reshade::api::effect_runtime* runtime,
 	if (techniqueName[0] == '\0')
 		return std::string();
 
-	char effectName[512] = {};
-	size_t effectNameSize = sizeof(effectName);
-	runtime->get_technique_effect_name(technique, effectName, &effectNameSize);
-
-	if (effectName[0] == '\0')
-		return std::string(techniqueName);
-
-	std::string displayKey = techniqueName;
-	displayKey += " [";
-	displayKey += effectName;
-	displayKey += "]";
-	return displayKey;
+	// ReShade 5.1-compatible path: older headers do not expose get_technique_effect_name().
+	// Store and match by technique name only, matching the original REST workflow.
+	return std::string(techniqueName);
 }
 
 static std::string getTechniqueLegacyName(reshade::api::effect_runtime* runtime, reshade::api::effect_technique technique)

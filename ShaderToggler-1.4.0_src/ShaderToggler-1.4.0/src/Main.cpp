@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
+#include <cctype>
 
 #ifdef min
 #undef min
@@ -319,6 +320,43 @@ static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 			g_assignedTechniqueLastAppliedState.erase(techniqueName);
 		}
 	});
+}
+
+
+static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
+{
+	const uint8_t keyCode = group.getToggleKey().getKeyCode();
+
+	switch (keyCode)
+	{
+	case VK_END:      return 0;
+
+	case VK_DIVIDE:   return 10;
+	case VK_MULTIPLY: return 11;
+	case VK_SUBTRACT: return 12;
+	case VK_ADD:      return 13;
+
+	case VK_BACK:     return 20;
+	case VK_PRIOR:    return 21;
+	case VK_NEXT:     return 22;
+
+	case VK_UP:       return 30;
+	case VK_RIGHT:    return 31;
+	case VK_DOWN:     return 32;
+	case VK_LEFT:     return 33;
+
+	case VK_NUMPAD7:  return 40;
+	case VK_NUMPAD8:  return 41;
+	case VK_NUMPAD9:  return 42;
+	case VK_NUMPAD0:  return 43;
+	case VK_DECIMAL:  return 44;
+
+	case VK_INSERT:   return 50;
+	case VK_DELETE:   return 51;
+
+	default:
+		return 1000 + static_cast<int>(keyCode);
+	}
 }
 
 static void sortToggleGroupsByHotkey()

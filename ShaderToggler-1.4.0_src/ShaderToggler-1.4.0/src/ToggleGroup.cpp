@@ -252,6 +252,40 @@ namespace ShaderToggler
 		return m_timedTriggerKeys;
 	}
 
+	const char* ToggleGroup::timedTriggerModeToString(TimedTriggerMode mode)
+	{
+		switch (mode)
+		{
+		case TimedTriggerMode::OnPress:
+			return "On press";
+		case TimedTriggerMode::WhileHeld:
+			return "While held";
+		case TimedTriggerMode::PressAndHold:
+			return "Press + hold";
+		default:
+			return "On press";
+		}
+	}
+
+	int ToggleGroup::timedTriggerModeToInt(TimedTriggerMode mode)
+	{
+		return static_cast<int>(mode);
+	}
+
+	ToggleGroup::TimedTriggerMode ToggleGroup::timedTriggerModeFromInt(int value)
+	{
+		switch (value)
+		{
+		case 1:
+			return TimedTriggerMode::WhileHeld;
+		case 2:
+			return TimedTriggerMode::PressAndHold;
+		case 0:
+		default:
+			return TimedTriggerMode::OnPress;
+		}
+	}
+
 	void ToggleGroup::addTimedSuppressionKey(const KeyData& key)
 	{
 		if (!key.isValid())

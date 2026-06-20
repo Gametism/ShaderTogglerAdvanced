@@ -1076,6 +1076,7 @@ static void onReshadePresent(effect_runtime* runtime)
 {
 	g_currentRuntime = runtime;
 	++g_presentFrameCounter;
+	++g_effectInjectionFrameCounter;
 
 	if (g_activeCollectorFrameCounter > 0)
 	{

@@ -89,8 +89,6 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLas
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedVisibleSince;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedSuppressionInputTime;
-static std::unordered_map<std::string, bool> g_assignedTechniqueOriginalState;
-static std::unordered_map<std::string, bool> g_assignedTechniqueLastAppliedState;
 static std::unordered_map<int, int> g_groupTechniqueComboIndex;
 static reshade::api::effect_runtime* g_currentRuntime = nullptr;
 static std::atomic_bool g_isInjectingAssignedEffects = false;
@@ -256,9 +254,7 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 	if (g_lastEffectInjectionFrame == g_effectInjectionFrameCounter)
 		return;
 
-	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
-
-	std::unordered_set<std::string> assignedTechniqueNames;
+	bool hasMatchingActiveInjectionGroup = false;
 
 	for (const auto& group : g_toggleGroups)
 	{
@@ -274,66 +270,32 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 		if (!groupContainsShaderHash(group, activePixelShaderHash, activeVertexShaderHash, activeComputeShaderHash))
 			continue;
 
-		for (const auto& techniqueName : group.getAssignedTechniqueNames())
-		{
-			if (!techniqueName.empty())
-				assignedTechniqueNames.insert(techniqueName);
-		}
+		hasMatchingActiveInjectionGroup = true;
+		break;
 	}
 
-	if (assignedTechniqueNames.empty())
+	if (!hasMatchingActiveInjectionGroup)
 		return;
 
-	struct TechniqueStateBackup
-	{
-		reshade::api::effect_technique technique;
-		bool originalState;
-		bool assigned;
-	};
-
-	std::vector<TechniqueStateBackup> backups;
-	bool hasAssignedTechnique = false;
-
-	g_currentRuntime->enumerate_techniques(nullptr, [&assignedTechniqueNames, &backups, &hasAssignedTechnique](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
-	{
-		if (rt == nullptr)
-			return;
-
-		char techniqueNameBuffer[512] = {};
-		size_t techniqueNameSize = sizeof(techniqueNameBuffer);
-		rt->get_technique_name(technique, techniqueNameBuffer, &techniqueNameSize);
-
-		if (techniqueNameBuffer[0] == '\0')
-			return;
-
-		const std::string techniqueName(techniqueNameBuffer);
-		const bool isAssigned = assignedTechniqueNames.count(techniqueName) != 0;
-		backups.push_back({ technique, rt->get_technique_state(technique), isAssigned });
-
-		if (isAssigned)
-			hasAssignedTechnique = true;
-	});
-
-	if (!hasAssignedTechnique)
-		return;
-
+	// IMPORTANT:
+	// Do not call set_technique_state() here.
+	// ReShade 5.1 does not expose a safe per-technique render call in these headers,
+	// so changing technique states from inside a draw callback can affect the user's normal
+	// ReShade effect state and can look like the assigned effect is being disabled when the
+	// group toggles off.
+	//
+	// This non-invasive injection path only renders the currently enabled ReShade effects
+	// at the matched group shader boundary. Therefore the assigned technique(s) must remain
+	// enabled in the normal ReShade technique list. The group's assigned technique list is
+	// used as an arming/filter list for the UI and for deciding whether the group should
+	// perform injection, but it no longer changes global technique enabled/disabled states.
 	g_lastEffectInjectionFrame = g_effectInjectionFrameCounter;
 	g_isInjectingAssignedEffects = true;
-
-	for (const auto& backup : backups)
-	{
-		g_currentRuntime->set_technique_state(backup.technique, backup.assigned);
-	}
 
 	g_currentRuntime->render_effects(
 		commandList,
 		reshade::api::resource_view { 0 },
 		reshade::api::resource_view { 0 });
-
-	for (const auto& backup : backups)
-	{
-		g_currentRuntime->set_technique_state(backup.technique, backup.originalState);
-	}
 
 	g_isInjectingAssignedEffects = false;
 }
@@ -2076,14 +2038,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 				ImGui::Text("Assigned ReShade effects");
 				ImGui::SameLine();
-				showHelpMarker("Assigned ReShade techniques are injected at the first matching shader of this group each frame. This is for placing effects before later layers like fog or HUD.");
+				showHelpMarker("Assigned ReShade techniques arm injection at the first matching shader of this group each frame. Keep the technique enabled in ReShade; ShaderToggler no longer toggles effect states.");
 
 				group.setAssignedTechniqueMode(ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader);
 				ImGui::Text("Effect mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				ImGui::TextUnformatted("Inject at group shader");
 				ImGui::SameLine();
-				showHelpMarker("Assigned ReShade techniques are rendered at the first matching shader in this group each frame, instead of being toggled globally.");
+				showHelpMarker("Renders currently enabled ReShade effects at the first matching shader boundary. This avoids changing global effect states and is safer for testing behind-fog injection.");
 
 				for (size_t techniqueIndex = 0; techniqueIndex < group.getAssignedTechniqueNameCount(); ++techniqueIndex)
 				{

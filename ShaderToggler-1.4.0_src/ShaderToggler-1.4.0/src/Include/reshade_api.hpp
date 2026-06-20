@@ -559,5 +559,15 @@ namespace reshade::api
 		/// <param name="name">Name of the definition.</param>
 		/// <param name="value">Value of the definition.</param>
 		virtual void set_preprocessor_definition(const char *name, const char *value) = 0;
+
+		/// <summary>
+		/// Applies a single technique to the specified render target.
+		/// This requires a ReShade runtime/SDK version that exposes per-technique rendering.
+		/// </summary>
+		/// <param name="technique">Opaque handle to the technique.</param>
+		/// <param name="cmd_list">Command list to add effect rendering commands to.</param>
+		/// <param name="rtv">Render target view to use for non-sRGB writes.</param>
+		/// <param name="rtv_srgb">Render target view to use for sRGB writes, or zero to use <paramref name="rtv"/>.</param>
+		virtual void render_technique(effect_technique technique, command_list *cmd_list, resource_view rtv, resource_view rtv_srgb = { 0 }) = 0;
 	};
 }

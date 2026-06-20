@@ -249,12 +249,15 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 	if (g_isInjectingAssignedEffects)
 		return;
 
-	// Safety: Only attempt one injected ReShade render per frame.
-	// Rendering effects from a draw callback repeatedly is fragile and can crash some games.
+	// Safety: only inject once per frame. This avoids recursive effect rendering and keeps the
+	// first matching shader boundary as the injection point for this frame.
 	if (g_lastEffectInjectionFrame == g_effectInjectionFrameCounter)
 		return;
 
-	bool hasMatchingActiveInjectionGroup = false;
+	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	reshade::api::resource_view activeRtv = commandListData.activeRenderTargetView;
+
+	std::unordered_set<std::string> techniquesToInject;
 
 	for (const auto& group : g_toggleGroups)
 	{
@@ -270,32 +273,36 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 		if (!groupContainsShaderHash(group, activePixelShaderHash, activeVertexShaderHash, activeComputeShaderHash))
 			continue;
 
-		hasMatchingActiveInjectionGroup = true;
-		break;
+		for (const auto& techniqueName : group.getAssignedTechniqueNames())
+		{
+			if (!techniqueName.empty())
+				techniquesToInject.insert(techniqueName);
+		}
 	}
 
-	if (!hasMatchingActiveInjectionGroup)
+	if (techniquesToInject.empty())
 		return;
 
-	// IMPORTANT:
-	// Do not call set_technique_state() here.
-	// ReShade 5.1 does not expose a safe per-technique render call in these headers,
-	// so changing technique states from inside a draw callback can affect the user's normal
-	// ReShade effect state and can look like the assigned effect is being disabled when the
-	// group toggles off.
-	//
-	// This non-invasive injection path only renders the currently enabled ReShade effects
-	// at the matched group shader boundary. Therefore the assigned technique(s) must remain
-	// enabled in the normal ReShade technique list. The group's assigned technique list is
-	// used as an arming/filter list for the UI and for deciding whether the group should
-	// perform injection, but it no longer changes global technique enabled/disabled states.
 	g_lastEffectInjectionFrame = g_effectInjectionFrameCounter;
 	g_isInjectingAssignedEffects = true;
 
-	g_currentRuntime->render_effects(
-		commandList,
-		reshade::api::resource_view { 0 },
-		reshade::api::resource_view { 0 });
+	// Proper injection path: render only the assigned techniques at the current shader boundary.
+	// This does not enable/disable global ReShade techniques and does not call render_effects().
+	g_currentRuntime->enumerate_techniques(nullptr,
+		[&](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
+		{
+			if (rt == nullptr)
+				return;
+
+			char techniqueName[512] = {};
+			size_t techniqueNameSize = sizeof(techniqueName);
+			rt->get_technique_name(technique, techniqueName, &techniqueNameSize);
+
+			if (techniquesToInject.count(std::string(techniqueName)) == 0)
+				return;
+
+			rt->render_technique(technique, commandList, activeRtv, activeRtv);
+		});
 
 	g_isInjectingAssignedEffects = false;
 }

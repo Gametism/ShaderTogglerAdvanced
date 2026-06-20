@@ -35,7 +35,7 @@ namespace ShaderToggler
 		, m_timedModeMinVisibleMs(250)
 		, m_timedModeFadeOutMs(150)
 		, m_timedSuppressionLingerMs(250)
-		, m_assignedTechniqueMode(AssignedTechniqueMode::EnableWhileActive)
+		, m_assignedTechniqueMode(AssignedTechniqueMode::InjectAtGroupShader)
 	{
 		(void)preserve_togglegroup_provenance();
 	}
@@ -381,70 +381,20 @@ namespace ShaderToggler
 
 	const char* ToggleGroup::assignedTechniqueModeToString(AssignedTechniqueMode mode)
 	{
-		switch (mode)
-		{
-		case AssignedTechniqueMode::EnableWhileActive:
-			return "Enable while group active";
-		case AssignedTechniqueMode::DisableWhileActive:
-			return "Disable while group active";
-		case AssignedTechniqueMode::InjectAtGroupShader:
-			return "Inject at group shader";
-		default:
-			return "Enable while group active";
-		}
+		(void)mode;
+		return "Inject at group shader";
 	}
 
 	int ToggleGroup::assignedTechniqueModeToInt(AssignedTechniqueMode mode)
 	{
-		return static_cast<int>(mode);
+		(void)mode;
+		return 0;
 	}
 
 	ToggleGroup::AssignedTechniqueMode ToggleGroup::assignedTechniqueModeFromInt(int value)
 	{
-		switch (value)
-		{
-		case 1:
-			return AssignedTechniqueMode::DisableWhileActive;
-		case 2:
-			return AssignedTechniqueMode::InjectAtGroupShader;
-		case 0:
-		default:
-			return AssignedTechniqueMode::EnableWhileActive;
-		}
-	}
-
-	const char* ToggleGroup::timedTriggerModeToString(TimedTriggerMode mode)
-	{
-		switch (mode)
-		{
-		case TimedTriggerMode::OnPress:
-			return "On press";
-		case TimedTriggerMode::WhileHeld:
-			return "While held";
-		case TimedTriggerMode::PressAndHold:
-			return "Press + hold";
-		default:
-			return "On press";
-		}
-	}
-
-	int ToggleGroup::timedTriggerModeToInt(TimedTriggerMode mode)
-	{
-		return static_cast<int>(mode);
-	}
-
-	ToggleGroup::TimedTriggerMode ToggleGroup::timedTriggerModeFromInt(int value)
-	{
-		switch (value)
-		{
-		case 1:
-			return TimedTriggerMode::WhileHeld;
-		case 2:
-			return TimedTriggerMode::PressAndHold;
-		case 0:
-		default:
-			return TimedTriggerMode::OnPress;
-		}
+		(void)value;
+		return AssignedTechniqueMode::InjectAtGroupShader;
 	}
 
 	void ToggleGroup::clearHashes()
@@ -492,7 +442,7 @@ namespace ShaderToggler
 		m_timedTriggerKeys.clear();
 		m_timedSuppressionKeys.clear();
 		m_assignedTechniqueNames.clear();
-		m_assignedTechniqueMode = AssignedTechniqueMode::EnableWhileActive;
+		m_assignedTechniqueMode = AssignedTechniqueMode::InjectAtGroupShader;
 		m_assignedTechniqueNames.clear();
 		m_assignedTechniqueNames.clear();
 
@@ -643,7 +593,7 @@ namespace ShaderToggler
 		}
 		else
 		{
-			m_assignedTechniqueMode = AssignedTechniqueMode::EnableWhileActive;
+			m_assignedTechniqueMode = AssignedTechniqueMode::InjectAtGroupShader;
 		}
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);

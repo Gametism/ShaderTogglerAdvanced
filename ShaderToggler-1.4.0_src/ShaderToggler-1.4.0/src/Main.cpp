@@ -59,6 +59,8 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 	uint64_t activePixelShaderPipeline;
 	uint64_t activeVertexShaderPipeline;
 	uint64_t activeComputeShaderPipeline;
+	resource_view activeRenderTargetView;
+	resource_view activeDepthStencilView;
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
@@ -264,118 +266,9 @@ static std::vector<std::string> collectAvailableTechniqueNames(reshade::api::eff
 
 static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 {
-	if (runtime == nullptr)
-		return;
-
-	std::unordered_set<std::string> assignedTechniqueNames;
-	std::unordered_map<std::string, bool> desiredTechniqueStates;
-
-	for (const auto& group : g_toggleGroups)
-	{
-		for (const auto& techniqueName : group.getAssignedTechniqueNames())
-		{
-			if (techniqueName.empty())
-				continue;
-
-			assignedTechniqueNames.insert(techniqueName);
-
-			// Injection groups do not globally force technique states. They render assigned
-			// techniques at the group shader boundary inside draw callbacks instead.
-			if (group.getAssignedTechniqueMode() == ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader)
-				continue;
-
-			// Only active groups override assigned techniques. Inactive groups simply restore later.
-			if (!group.isActive())
-				continue;
-
-			bool desiredState = true;
-			switch (group.getAssignedTechniqueMode())
-			{
-			case ToggleGroup::AssignedTechniqueMode::DisableWhileActive:
-				desiredState = false;
-				break;
-			case ToggleGroup::AssignedTechniqueMode::EnableWhileActive:
-			default:
-				desiredState = true;
-				break;
-			}
-
-			// If multiple active groups control the same saved technique key, explicit disable wins.
-			auto existingIt = desiredTechniqueStates.find(techniqueName);
-			if (existingIt == desiredTechniqueStates.end())
-			{
-				desiredTechniqueStates[techniqueName] = desiredState;
-			}
-			else if (!desiredState)
-			{
-				existingIt->second = false;
-			}
-		}
-	}
-
-	if (assignedTechniqueNames.empty())
-	{
-		g_assignedTechniqueOriginalState.clear();
-		g_assignedTechniqueLastAppliedState.clear();
-		return;
-	}
-
-	runtime->enumerate_techniques(nullptr, [&assignedTechniqueNames, &desiredTechniqueStates](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
-	{
-		if (rt == nullptr)
-			return;
-
-		const std::string displayKey = getTechniqueDisplayKey(rt, technique);
-		const std::string legacyName = getTechniqueLegacyName(rt, technique);
-
-		std::string matchedKey;
-		if (!assignedTechniqueMatches(assignedTechniqueNames, displayKey, legacyName, matchedKey))
-			return;
-
-		auto desiredStateIt = desiredTechniqueStates.find(matchedKey);
-		if (desiredStateIt != desiredTechniqueStates.end())
-		{
-			const bool desiredState = desiredStateIt->second;
-
-			if (g_assignedTechniqueOriginalState.find(matchedKey) == g_assignedTechniqueOriginalState.end())
-			{
-				g_assignedTechniqueOriginalState[matchedKey] = rt->get_technique_state(technique);
-			}
-
-			// Force the state every frame while controlled. This makes the feature robust against
-			// ReShade UI changes, effect reloads, and other add-ons changing the technique state.
-			rt->set_technique_state(technique, desiredState);
-			g_assignedTechniqueLastAppliedState[matchedKey] = desiredState;
-			return;
-		}
-
-		// No active group currently controls this technique. Restore the state the user had
-		// before ShaderToggler started overriding it, then release the cache entry.
-		auto originalStateIt = g_assignedTechniqueOriginalState.find(matchedKey);
-		if (originalStateIt != g_assignedTechniqueOriginalState.end())
-		{
-			const bool originalState = originalStateIt->second;
-			rt->set_technique_state(technique, originalState);
-
-			g_assignedTechniqueOriginalState.erase(originalStateIt);
-			g_assignedTechniqueLastAppliedState.erase(matchedKey);
-		}
-	});
-}
-
-
-static bool groupContainsShaderHash(const ToggleGroup& group, uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
-{
-	if (pixelHash != 0 && group.getPixelShaderHashes().count(pixelHash) != 0)
-		return true;
-
-	if (vertexHash != 0 && group.getVertexShaderHashes().count(vertexHash) != 0)
-		return true;
-
-	if (computeHash != 0 && group.getComputeShaderHashes().count(computeHash) != 0)
-		return true;
-
-	return false;
+	(void)runtime;
+	// Global technique toggling was removed intentionally.
+	// Assigned effects are only used by the render-target injection mode now.
 }
 
 static bool anyInjectGroupMatchesCurrentShaders(uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
@@ -399,9 +292,9 @@ static bool anyInjectGroupMatchesCurrentShaders(uint32_t pixelHash, uint32_t ver
 }
 
 static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* commandList,
-	uint32_t pixelHash,
-	uint32_t vertexHash,
-	uint32_t computeHash)
+	uint32_t activePixelShaderHash,
+	uint32_t activeVertexShaderHash,
+	uint32_t activeComputeShaderHash)
 {
 	if (commandList == nullptr || g_currentRuntime == nullptr)
 		return;
@@ -409,10 +302,10 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 	if (g_isInjectingAssignedEffects)
 		return;
 
-	if (commandList->get_device() != g_currentRuntime->get_device())
+	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	if (commandListData.activeRenderTargetView.handle == 0)
 		return;
 
-	std::vector<const ToggleGroup*> matchedGroups;
 	std::unordered_set<std::string> assignedTechniqueNames;
 
 	for (const auto& group : g_toggleGroups)
@@ -426,17 +319,18 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 		if (!group.hasAssignedTechniqueNames())
 			continue;
 
-		if (!groupContainsShaderHash(group, pixelHash, vertexHash, computeHash))
+		bool groupMatchesCurrentDraw = false;
+
+		if (activePixelShaderHash > 0 && group.getPixelShaderHashes().count(activePixelShaderHash) != 0)
+			groupMatchesCurrentDraw = true;
+		if (activeVertexShaderHash > 0 && group.getVertexShaderHashes().count(activeVertexShaderHash) != 0)
+			groupMatchesCurrentDraw = true;
+		if (activeComputeShaderHash > 0 && group.getComputeShaderHashes().count(activeComputeShaderHash) != 0)
+			groupMatchesCurrentDraw = true;
+
+		if (!groupMatchesCurrentDraw)
 			continue;
 
-		// Render each injection group only once per present. This keeps the first matching
-		// draw call as the boundary and prevents repeated effect passes for every later
-		// draw using the same shader.
-		auto injectedIt = g_groupLastInjectedFrame.find(group.getId());
-		if (injectedIt != g_groupLastInjectedFrame.end() && injectedIt->second == g_presentFrameCounter)
-			continue;
-
-		matchedGroups.push_back(&group);
 		for (const auto& techniqueName : group.getAssignedTechniqueNames())
 		{
 			if (!techniqueName.empty())
@@ -444,509 +338,38 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 		}
 	}
 
-	if (matchedGroups.empty() || assignedTechniqueNames.empty())
+	if (assignedTechniqueNames.empty())
 		return;
 
 	std::vector<reshade::api::effect_technique> techniquesToRender;
-	std::vector<std::pair<reshade::api::effect_technique, bool>> originalStates;
 
-	g_currentRuntime->enumerate_techniques(nullptr, [&assignedTechniqueNames, &techniquesToRender, &originalStates](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
+	g_currentRuntime->enumerate_techniques(nullptr, [&assignedTechniqueNames, &techniquesToRender](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
 	{
-		if (rt == nullptr)
-			return;
-
 		const std::string displayKey = getTechniqueDisplayKey(rt, technique);
 		const std::string legacyName = getTechniqueLegacyName(rt, technique);
-
 		std::string matchedKey;
-		const bool matched = assignedTechniqueMatches(assignedTechniqueNames, displayKey, legacyName, matchedKey);
 
-		const bool originalState = rt->get_technique_state(technique);
-		originalStates.push_back(std::make_pair(technique, originalState));
-
-		// Temporarily enable only the assigned techniques for this injection pass.
-		// Everything is restored immediately after render_effects returns.
-		rt->set_technique_state(technique, matched);
-
-		if (matched)
+		if (assignedTechniqueMatches(assignedTechniqueNames, displayKey, legacyName, matchedKey))
+		{
 			techniquesToRender.push_back(technique);
+		}
 	});
 
 	if (techniquesToRender.empty())
-	{
-		for (const auto& state : originalStates)
-			g_currentRuntime->set_technique_state(state.first, state.second);
 		return;
-	}
 
 	g_isInjectingAssignedEffects = true;
-	g_currentRuntime->render_effects(commandList, reshade::api::resource_view { 0 }, reshade::api::resource_view { 0 });
+
+	for (const auto technique : techniquesToRender)
+	{
+		g_currentRuntime->render_technique(
+			technique,
+			commandList,
+			commandListData.activeRenderTargetView,
+			commandListData.activeRenderTargetView);
+	}
+
 	g_isInjectingAssignedEffects = false;
-
-	for (const auto& state : originalStates)
-		g_currentRuntime->set_technique_state(state.first, state.second);
-
-	for (const ToggleGroup* group : matchedGroups)
-		g_groupLastInjectedFrame[group->getId()] = g_presentFrameCounter;
-}
-
-static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
-{
-	const uint8_t keyCode = group.getToggleKey().getKeyCode();
-
-	switch (keyCode)
-	{
-	case VK_END:      return 0;
-
-	case VK_DIVIDE:   return 10;
-	case VK_MULTIPLY: return 11;
-	case VK_SUBTRACT: return 12;
-	case VK_ADD:      return 13;
-
-	case VK_BACK:     return 20;
-	case VK_PRIOR:    return 21;
-	case VK_NEXT:     return 22;
-
-	case VK_UP:       return 30;
-	case VK_RIGHT:    return 31;
-	case VK_DOWN:     return 32;
-	case VK_LEFT:     return 33;
-
-	case VK_NUMPAD7:  return 40;
-	case VK_NUMPAD8:  return 41;
-	case VK_NUMPAD9:  return 42;
-	case VK_NUMPAD0:  return 43;
-	case VK_DECIMAL:  return 44;
-
-	case VK_INSERT:   return 50;
-	case VK_DELETE:   return 51;
-
-	default:
-		return 1000 + static_cast<int>(keyCode);
-	}
-}
-
-static void sortToggleGroupsByHotkey()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const int priorityA = getHotkeyLayoutSortPriority(a);
-			const int priorityB = getHotkeyLayoutSortPriority(b);
-
-			if (priorityA != priorityB)
-			{
-				return priorityA < priorityB;
-			}
-
-			const int keyA = a.getToggleKey().toInt();
-			const int keyB = b.getToggleKey().toInt();
-
-			if (keyA != keyB)
-			{
-				return keyA < keyB;
-			}
-
-			return toLowerCopy(a.getName()) < toLowerCopy(b.getName());
-		});
-
-	saveShaderTogglerIniFile();
-}
-
-static void sortToggleGroupsByNameAZ()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const std::string nameA = toLowerCopy(a.getName());
-			const std::string nameB = toLowerCopy(b.getName());
-
-			if (nameA != nameB)
-			{
-				return nameA < nameB;
-			}
-
-			return a.getId() < b.getId();
-		});
-
-	saveShaderTogglerIniFile();
-}
-
-static void sortToggleGroupsByNameLength()
-{
-	std::stable_sort(g_toggleGroups.begin(), g_toggleGroups.end(),
-		[](const ToggleGroup& a, const ToggleGroup& b)
-		{
-			const size_t lengthA = a.getName().length();
-			const size_t lengthB = b.getName().length();
-
-			if (lengthA != lengthB)
-			{
-				return lengthA < lengthB;
-			}
-
-			return a.getName() < b.getName();
-		});
-
-	saveShaderTogglerIniFile();
-}
-
-static void appendSortedHashesToSignature(std::string& data, const char* prefix, const std::unordered_set<uint32_t>& hashes)
-{
-	std::vector<uint32_t> sorted(hashes.begin(), hashes.end());
-	std::sort(sorted.begin(), sorted.end());
-
-	for (const auto value : sorted)
-	{
-		data += "|";
-		data += prefix;
-		data += "=";
-		data += std::to_string(value);
-	}
-}
-
-static bool isTimedTriggerBindingActive(const ToggleGroup::TimedTriggerBinding& binding, reshade::api::effect_runtime* runtime)
-{
-	switch (binding.mode)
-	{
-	case ToggleGroup::TimedTriggerMode::OnPress:
-		return binding.key.isKeyPressed(runtime);
-	case ToggleGroup::TimedTriggerMode::WhileHeld:
-		return binding.key.isKeyDown(runtime);
-	case ToggleGroup::TimedTriggerMode::PressAndHold:
-		return binding.key.isKeyPressed(runtime) || binding.key.isKeyDown(runtime);
-	default:
-		return binding.key.isKeyPressed(runtime);
-	}
-}
-
-static bool isAnyTimedTriggerActive(const ToggleGroup& group, reshade::api::effect_runtime* runtime)
-{
-	if (group.hasTimedTriggerKeys())
-	{
-		for (size_t i = 0; i < group.getTimedTriggerKeyCount(); ++i)
-		{
-			if (isTimedTriggerBindingActive(group.getTimedTriggerBindingAt(i), runtime))
-				return true;
-		}
-		return false;
-	}
-
-	return group.getToggleKey().isKeyPressed(runtime);
-}
-
-static bool isAnyTimedSuppressionKeyDown(const ToggleGroup& group, reshade::api::effect_runtime* runtime)
-{
-	if (!group.hasTimedSuppressionKeys())
-		return false;
-
-	for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
-	{
-		if (group.getTimedSuppressionKeyAt(i).isKeyDown(runtime))
-			return true;
-	}
-
-	return false;
-}
-
-static void setGroupActiveWithEditRefresh(ToggleGroup& group, bool newActive)
-{
-	const bool previousActive = group.isActive();
-	group.setActive(newActive);
-
-	if (group.getId() == g_toggleGroupIdShaderEditing && previousActive != newActive)
-	{
-		g_vertexShaderManager.toggleHideMarkedShaders();
-		g_pixelShaderManager.toggleHideMarkedShaders();
-		g_computeShaderManager.toggleHideMarkedShaders();
-	}
-}
-
-static std::string buildIniSignature()
-{
-	std::string data;
-
-	//
-	data += "Creator=";
-	data += GT_CREATOR;
-	data += "|AmountGroups=";
-	data += std::to_string(g_toggleGroups.size());
-	data += "|ControllerMode=";
-	data += std::to_string(static_cast<int>(KeyData::getControllerLabelMode()));
-	data += "|GlobalHotkeyModifier=";
-	data += std::to_string(KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()));
-
-	//
-	data += "|SigA=";
-	data += GT_SIG_A;
-	data += "|SigB=";
-	data += GT_SIG_B;
-	data += "|SigC=";
-	data += GT_SIG_C;
-	data += "|SigD=";
-	data += GT_SIG_D;
-	data += "|SigSeed=";
-	data += toHex64(GT_SIG_SEED);
-
-	for (const auto& group : g_toggleGroups)
-	{
-		data += "|Name=" + group.getName();
-		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
-		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
-		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
-		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
-		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
-		data += "|TimedInverted=" + std::to_string(group.isTimedModeInverted() ? 1 : 0);
-		data += "|TimedDelay=" + std::to_string(group.getTimedModeDelayMs());
-		data += "|TimedMinVisible=" + std::to_string(group.getTimedModeMinVisibleMs());
-		data += "|TimedFadeOut=" + std::to_string(group.getTimedModeFadeOutMs());
-		data += "|TimedTriggerCount=" + std::to_string(group.getTimedTriggerKeyCount());
-
-		for (size_t i = 0; i < group.getTimedTriggerKeyCount(); ++i)
-		{
-			data += "|TimedTriggerKey" + std::to_string(i) + "=" + std::to_string(group.getTimedTriggerKeyAt(i).toInt());
-			data += "|TimedTriggerMode" + std::to_string(i) + "=" + std::to_string(ToggleGroup::timedTriggerModeToInt(group.getTimedTriggerModeAt(i)));
-		}
-
-		data += "|TimedSuppressionCount=" + std::to_string(group.getTimedSuppressionKeyCount());
-		data += "|TimedSuppressionLinger=" + std::to_string(group.getTimedSuppressionLingerMs());
-		for (size_t i = 0; i < group.getTimedSuppressionKeyCount(); ++i)
-		{
-			data += "|TimedSuppressionKey" + std::to_string(i) + "=" + std::to_string(group.getTimedSuppressionKeyAt(i).toInt());
-		}
-
-		data += "|AssignedTechniqueCount=" + std::to_string(group.getAssignedTechniqueNameCount());
-		data += "|AssignedTechniqueMode=" + std::to_string(ToggleGroup::assignedTechniqueModeToInt(group.getAssignedTechniqueMode()));
-		for (size_t i = 0; i < group.getAssignedTechniqueNameCount(); ++i)
-		{
-			data += "|AssignedTechnique" + std::to_string(i) + "=" + group.getAssignedTechniqueNameAt(i);
-		}
-
-		appendSortedHashesToSignature(data, "P", group.getPixelShaderHashes());
-		appendSortedHashesToSignature(data, "V", group.getVertexShaderHashes());
-		appendSortedHashesToSignature(data, "C", group.getComputeShaderHashes());
-	}
-
-	return toHex64(fnv1a64(data));
-}
-
-static bool fileContainsTopAndBottomWatermark(const std::string& filename)
-{
-	std::ifstream inFile(filename, std::ios::binary);
-	if (!inFile.is_open())
-		return false;
-
-	std::string content((std::istreambuf_iterator<char>(inFile)),
-	                    std::istreambuf_iterator<char>());
-	inFile.close();
-
-	const bool hasHeader = content.rfind(GT_HEADER, 0) == 0;
-	const bool hasFooter = content.find(GT_FOOTER) != std::string::npos;
-
-	return hasHeader && hasFooter;
-}
-
-static void rewriteIniWithTopAndBottomWatermark(const std::string& filename)
-{
-	std::ifstream inFile(filename, std::ios::binary);
-	if (!inFile.is_open())
-		return;
-
-	std::string content((std::istreambuf_iterator<char>(inFile)),
-	                    std::istreambuf_iterator<char>());
-	inFile.close();
-
-	if (content.rfind(GT_HEADER, 0) == 0)
-	{
-		content.erase(0, std::strlen(GT_HEADER));
-	}
-
-	size_t footerPos = content.find(GT_FOOTER);
-	if (footerPos != std::string::npos)
-	{
-		content.erase(footerPos, std::strlen(GT_FOOTER));
-	}
-
-	std::ofstream outFile(filename, std::ios::binary | std::ios::trunc);
-	if (!outFile.is_open())
-		return;
-
-	outFile << GT_HEADER << content << GT_FOOTER;
-	outFile.close();
-}
-
-static uint32_t calculateShaderHash(void* shaderData)
-{
-	if (nullptr == shaderData)
-	{
-		return 0;
-	}
-
-	const auto shaderDesc = *static_cast<shader_desc *>(shaderData);
-	return compute_crc32(static_cast<const uint8_t *>(shaderDesc.code), shaderDesc.code_size);
-}
-
-static void applyModernUiStyle()
-{
-	if (g_uiStyleInitialized)
-		return;
-
-	ImGuiStyle& style = ImGui::GetStyle();
-
-	style.WindowPadding = ImVec2(10.0f, 10.0f);
-	style.FramePadding = ImVec2(9.0f, 6.0f);
-	style.ItemSpacing = ImVec2(8.0f, 7.0f);
-	style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
-	style.CellPadding = ImVec2(6.0f, 5.0f);
-
-	style.WindowRounding = 8.0f;
-	style.ChildRounding = 6.0f;
-	style.FrameRounding = 6.0f;
-	style.PopupRounding = 6.0f;
-	style.ScrollbarRounding = 6.0f;
-	style.GrabRounding = 6.0f;
-	style.TabRounding = 6.0f;
-
-	style.WindowBorderSize = 1.0f;
-	style.ChildBorderSize = 1.0f;
-	style.PopupBorderSize = 1.0f;
-	style.FrameBorderSize = 0.0f;
-
-	style.ScrollbarSize = 14.0f;
-	style.GrabMinSize = 11.0f;
-	style.IndentSpacing = 18.0f;
-
-	style.Colors[ImGuiCol_WindowBg]            = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-	style.Colors[ImGuiCol_ChildBg]             = ImVec4(0.13f, 0.14f, 0.17f, 0.55f);
-	style.Colors[ImGuiCol_PopupBg]             = ImVec4(0.11f, 0.12f, 0.15f, 0.96f);
-	style.Colors[ImGuiCol_Border]              = ImVec4(0.24f, 0.27f, 0.31f, 1.00f);
-	style.Colors[ImGuiCol_Separator]           = ImVec4(0.24f, 0.27f, 0.31f, 1.00f);
-
-	style.Colors[ImGuiCol_FrameBg]             = ImVec4(0.17f, 0.19f, 0.23f, 1.00f);
-	style.Colors[ImGuiCol_FrameBgHovered]      = ImVec4(0.21f, 0.24f, 0.29f, 1.00f);
-	style.Colors[ImGuiCol_FrameBgActive]       = ImVec4(0.24f, 0.28f, 0.34f, 1.00f);
-
-	style.Colors[ImGuiCol_Button]              = ImVec4(0.21f, 0.33f, 0.50f, 1.00f);
-	style.Colors[ImGuiCol_ButtonHovered]       = ImVec4(0.27f, 0.40f, 0.60f, 1.00f);
-	style.Colors[ImGuiCol_ButtonActive]        = ImVec4(0.18f, 0.28f, 0.43f, 1.00f);
-
-	style.Colors[ImGuiCol_Header]              = ImVec4(0.18f, 0.25f, 0.34f, 1.00f);
-	style.Colors[ImGuiCol_HeaderHovered]       = ImVec4(0.24f, 0.32f, 0.43f, 1.00f);
-	style.Colors[ImGuiCol_HeaderActive]        = ImVec4(0.20f, 0.28f, 0.38f, 1.00f);
-
-	style.Colors[ImGuiCol_CheckMark]           = ImVec4(0.45f, 0.73f, 1.00f, 1.00f);
-	style.Colors[ImGuiCol_SliderGrab]          = ImVec4(0.45f, 0.73f, 1.00f, 1.00f);
-	style.Colors[ImGuiCol_SliderGrabActive]    = ImVec4(0.36f, 0.66f, 1.00f, 1.00f);
-
-	style.Colors[ImGuiCol_Text]                = ImVec4(0.94f, 0.95f, 0.97f, 1.00f);
-	style.Colors[ImGuiCol_TextDisabled]        = ImVec4(0.62f, 0.66f, 0.72f, 1.00f);
-
-	g_uiStyleInitialized = true;
-}
-
-void addDefaultGroup()
-{
-	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
-	toAdd.setToggleKey(VK_CAPITAL, false, false, false);
-	g_toggleGroups.push_back(toAdd);
-}
-
-void loadShaderTogglerIniFile()
-{
-	CDataFile iniFile;
-	if (!iniFile.Load(g_iniFileName))
-	{
-		return;
-	}
-
-	int numberOfGroups = iniFile.GetInt("GTAmountGroups", "General");
-	bool usingCustomFormat = true;
-
-	if (numberOfGroups == INT_MIN)
-	{
-		numberOfGroups = iniFile.GetInt("AmountGroups", "General");
-		usingCustomFormat = false;
-	}
-
-	const int savedControllerMode = iniFile.GetInt("ControllerLabelMode", "General");
-	if (savedControllerMode >= static_cast<int>(KeyData::ControllerLabelMode::Auto) &&
-		savedControllerMode <= static_cast<int>(KeyData::ControllerLabelMode::PlayStation))
-	{
-		KeyData::setControllerLabelMode(static_cast<KeyData::ControllerLabelMode>(savedControllerMode));
-	}
-	else
-	{
-		KeyData::setControllerLabelMode(KeyData::ControllerLabelMode::Auto);
-	}
-
-	const int savedGlobalModifier = iniFile.GetInt("GlobalHotkeyModifier", "General");
-	if (savedGlobalModifier != INT_MIN)
-	{
-		KeyData::setGlobalHotkeyModifier(KeyData::globalHotkeyModifierFromInt(savedGlobalModifier));
-	}
-	else
-	{
-		KeyData::setGlobalHotkeyModifier(KeyData::GlobalHotkeyModifier::None);
-	}
-
-	if (numberOfGroups == INT_MIN)
-	{
-		addDefaultGroup();
-		g_toggleGroups[0].loadState(iniFile, -1, false);
-		saveShaderTogglerIniFile();
-		return;
-	}
-
-	g_toggleGroups.clear();
-	for (int i = 0; i < numberOfGroups; i++)
-	{
-		g_toggleGroups.push_back(ToggleGroup("", ToggleGroup::getNewGroupId()));
-		g_toggleGroups.back().loadState(iniFile, i, usingCustomFormat);
-	}
-
-	if (usingCustomFormat)
-	{
-		const std::string creator = iniFile.GetValue("Creator", "General");
-		const std::string savedStamp = iniFile.GetValue(GT_CACHE_KEY, "General");
-		const std::string currentStamp = buildIniSignature();
-
-		bool needsRepair = false;
-
-		if (creator != GT_CREATOR)
-			needsRepair = true;
-
-		if (savedStamp != currentStamp)
-			needsRepair = true;
-
-		if (!fileContainsTopAndBottomWatermark(g_iniFileName))
-			needsRepair = true;
-
-		if (needsRepair)
-		{
-			saveShaderTogglerIniFile();
-		}
-	}
-}
-
-void saveShaderTogglerIniFile()
-{
-	CDataFile iniFile;
-
-	iniFile.SetInt("GTAmountGroups", static_cast<int>(g_toggleGroups.size()), "", "General");
-	iniFile.SetValue("Creator", GT_CREATOR, "", "General");
-	iniFile.SetValue(GT_CACHE_KEY, buildIniSignature(), "", "General");
-	iniFile.SetInt("ControllerLabelMode", static_cast<int>(KeyData::getControllerLabelMode()), "", "General");
-	iniFile.SetInt("GlobalHotkeyModifier", KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()), "", "General");
-
-	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
-	{
-		g_toggleGroups[i].saveState(iniFile, i, true);
-	}
-
-	iniFile.SetFileName(g_iniFileName);
-	iniFile.Save();
-
-	rewriteIniWithTopAndBottomWatermark(g_iniFileName);
 }
 
 static void onInitCommandList(command_list *commandList)
@@ -965,6 +388,18 @@ static void onResetCommandList(command_list *commandList)
 	commandListData.activePixelShaderPipeline = static_cast<uint64_t>(-1);
 	commandListData.activeVertexShaderPipeline = static_cast<uint64_t>(-1);
 	commandListData.activeComputeShaderPipeline = static_cast<uint64_t>(-1);
+	commandListData.activeRenderTargetView = resource_view { 0 };
+	commandListData.activeDepthStencilView = resource_view { 0 };
+}
+
+static void onBindRenderTargetsAndDepthStencil(command_list* commandList, uint32_t count, const resource_view* rtvs, resource_view dsv)
+{
+	if (commandList == nullptr)
+		return;
+
+	CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	commandListData.activeRenderTargetView = (count > 0 && rtvs != nullptr) ? rtvs[0] : resource_view { 0 };
+	commandListData.activeDepthStencilView = dsv;
 }
 
 static void onInitPipeline(device *, pipeline_layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
@@ -2212,14 +1647,14 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::SameLine();
 				showHelpMarker("Assigned ReShade techniques can either be globally enabled/disabled while this group is active, or injected at the first matching group shader each frame. Injection mode is experimental and intended for effects behind fog/HUD boundaries.");
 
-				int assignedTechniqueMode = ToggleGroup::assignedTechniqueModeToInt(group.getAssignedTechniqueMode());
-				const char* assignedTechniqueModeItems[] = { "Enable while group active", "Disable while group active", "Inject at group shader" };
+				int assignedTechniqueMode = 0;
+				const char* assignedTechniqueModeItems[] = { "Inject at group shader" };
 				ImGui::Text("Effect mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.45f);
 				if (ImGui::Combo("##AssignedTechniqueMode", &assignedTechniqueMode, assignedTechniqueModeItems, IM_ARRAYSIZE(assignedTechniqueModeItems)))
 				{
-					group.setAssignedTechniqueMode(ToggleGroup::assignedTechniqueModeFromInt(assignedTechniqueMode));
+					group.setAssignedTechniqueMode(ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader);
 				}
 				ImGui::SameLine();
 				showHelpMarker("Choose whether assigned ReShade techniques turn ON or OFF while this toggle group is active.");
@@ -2532,6 +1967,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
 		reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+		reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(onBindRenderTargetsAndDepthStencil);
 		reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
 		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
@@ -2556,6 +1992,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 		reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+		reshade::unregister_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(onBindRenderTargetsAndDepthStencil);
 		reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);
 		reshade::unregister_overlay(nullptr, &displaySettings);
 		reshade::unregister_addon(hModule);

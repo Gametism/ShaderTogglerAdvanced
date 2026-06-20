@@ -186,6 +186,65 @@ static std::string toLowerCopy(std::string text)
 	return text;
 }
 
+static std::string getTechniqueDisplayKey(reshade::api::effect_runtime* runtime, reshade::api::effect_technique technique)
+{
+	if (runtime == nullptr)
+		return std::string();
+
+	char techniqueName[512] = {};
+	size_t techniqueNameSize = sizeof(techniqueName);
+	runtime->get_technique_name(technique, techniqueName, &techniqueNameSize);
+
+	if (techniqueName[0] == '\0')
+		return std::string();
+
+	char effectName[512] = {};
+	size_t effectNameSize = sizeof(effectName);
+	runtime->get_technique_effect_name(technique, effectName, &effectNameSize);
+
+	if (effectName[0] == '\0')
+		return std::string(techniqueName);
+
+	std::string displayKey = techniqueName;
+	displayKey += " [";
+	displayKey += effectName;
+	displayKey += "]";
+	return displayKey;
+}
+
+static std::string getTechniqueLegacyName(reshade::api::effect_runtime* runtime, reshade::api::effect_technique technique)
+{
+	if (runtime == nullptr)
+		return std::string();
+
+	char techniqueName[512] = {};
+	size_t techniqueNameSize = sizeof(techniqueName);
+	runtime->get_technique_name(technique, techniqueName, &techniqueNameSize);
+
+	return std::string(techniqueName);
+}
+
+static bool assignedTechniqueMatches(const std::unordered_set<std::string>& assignedTechniqueNames,
+	const std::string& displayKey,
+	const std::string& legacyName,
+	std::string& matchedKey)
+{
+	if (!displayKey.empty() && assignedTechniqueNames.count(displayKey) != 0)
+	{
+		matchedKey = displayKey;
+		return true;
+	}
+
+	// Backwards compatibility for configs saved by Phase 2/3/4, which only stored the raw technique name.
+	if (!legacyName.empty() && assignedTechniqueNames.count(legacyName) != 0)
+	{
+		matchedKey = legacyName;
+		return true;
+	}
+
+	return false;
+}
+
 static std::vector<std::string> collectAvailableTechniqueNames(reshade::api::effect_runtime* runtime)
 {
 	std::vector<std::string> names;
@@ -195,16 +254,10 @@ static std::vector<std::string> collectAvailableTechniqueNames(reshade::api::eff
 
 	runtime->enumerate_techniques(nullptr, [&names](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
 	{
-		char techniqueName[512] = {};
-		size_t techniqueNameSize = sizeof(techniqueName);
-
-		if (rt == nullptr)
-			return;
-
-		rt->get_technique_name(technique, techniqueName, &techniqueNameSize);
-		if (techniqueName[0] != '\0')
+		const std::string displayKey = getTechniqueDisplayKey(rt, technique);
+		if (!displayKey.empty())
 		{
-			names.emplace_back(techniqueName);
+			names.emplace_back(displayKey);
 		}
 	});
 
@@ -230,8 +283,7 @@ static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 
 			assignedTechniqueNames.insert(techniqueName);
 
-			// "While group active" should only override the technique while the group is active.
-			// When no active group controls the technique anymore, the original user state is restored.
+			// Only active groups override assigned techniques. Inactive groups simply restore later.
 			if (!group.isActive())
 				continue;
 
@@ -247,8 +299,7 @@ static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 				break;
 			}
 
-			// If multiple active groups control the same technique, explicit disable wins.
-			// This avoids an effect being enabled by one group while another active group expects it off.
+			// If multiple active groups control the same saved technique key, explicit disable wins.
 			auto existingIt = desiredTechniqueStates.find(techniqueName);
 			if (existingIt == desiredTechniqueStates.end())
 			{
@@ -270,58 +321,46 @@ static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 
 	runtime->enumerate_techniques(nullptr, [&assignedTechniqueNames, &desiredTechniqueStates](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
 	{
-		char techniqueNameBuffer[512] = {};
-		size_t techniqueNameSize = sizeof(techniqueNameBuffer);
-
 		if (rt == nullptr)
 			return;
 
-		rt->get_technique_name(technique, techniqueNameBuffer, &techniqueNameSize);
-		if (techniqueNameBuffer[0] == '\0')
+		const std::string displayKey = getTechniqueDisplayKey(rt, technique);
+		const std::string legacyName = getTechniqueLegacyName(rt, technique);
+
+		std::string matchedKey;
+		if (!assignedTechniqueMatches(assignedTechniqueNames, displayKey, legacyName, matchedKey))
 			return;
 
-		const std::string techniqueName(techniqueNameBuffer);
-		if (assignedTechniqueNames.count(techniqueName) == 0)
-			return;
-
-		auto desiredStateIt = desiredTechniqueStates.find(techniqueName);
+		auto desiredStateIt = desiredTechniqueStates.find(matchedKey);
 		if (desiredStateIt != desiredTechniqueStates.end())
 		{
 			const bool desiredState = desiredStateIt->second;
 
-			if (g_assignedTechniqueOriginalState.find(techniqueName) == g_assignedTechniqueOriginalState.end())
+			if (g_assignedTechniqueOriginalState.find(matchedKey) == g_assignedTechniqueOriginalState.end())
 			{
-				g_assignedTechniqueOriginalState[techniqueName] = rt->get_technique_state(technique);
+				g_assignedTechniqueOriginalState[matchedKey] = rt->get_technique_state(technique);
 			}
 
-			auto previousStateIt = g_assignedTechniqueLastAppliedState.find(techniqueName);
-			if (previousStateIt != g_assignedTechniqueLastAppliedState.end() && previousStateIt->second == desiredState)
-				return;
-
+			// Force the state every frame while controlled. This makes the feature robust against
+			// ReShade UI changes, effect reloads, and other add-ons changing the technique state.
 			rt->set_technique_state(technique, desiredState);
-			g_assignedTechniqueLastAppliedState[techniqueName] = desiredState;
+			g_assignedTechniqueLastAppliedState[matchedKey] = desiredState;
 			return;
 		}
 
 		// No active group currently controls this technique. Restore the state the user had
 		// before ShaderToggler started overriding it, then release the cache entry.
-		auto originalStateIt = g_assignedTechniqueOriginalState.find(techniqueName);
+		auto originalStateIt = g_assignedTechniqueOriginalState.find(matchedKey);
 		if (originalStateIt != g_assignedTechniqueOriginalState.end())
 		{
 			const bool originalState = originalStateIt->second;
-			auto previousStateIt = g_assignedTechniqueLastAppliedState.find(techniqueName);
-
-			if (previousStateIt == g_assignedTechniqueLastAppliedState.end() || previousStateIt->second != originalState)
-			{
-				rt->set_technique_state(technique, originalState);
-			}
+			rt->set_technique_state(technique, originalState);
 
 			g_assignedTechniqueOriginalState.erase(originalStateIt);
-			g_assignedTechniqueLastAppliedState.erase(techniqueName);
+			g_assignedTechniqueLastAppliedState.erase(matchedKey);
 		}
 	});
 }
-
 
 static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
 {

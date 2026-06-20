@@ -2062,10 +2062,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 				ImGui::Text("Assigned ReShade effects");
 				ImGui::SameLine();
-				showHelpMarker("Assigned ReShade techniques are controlled by this group. This is still global technique control, not per-draw injection yet.");
+				showHelpMarker("Assigned ReShade techniques are injected at the first matching shader of this group each frame. This is for placing effects before later layers like fog or HUD.");
 
 				int assignedTechniqueMode = ToggleGroup::assignedTechniqueModeToInt(group.getAssignedTechniqueMode());
-				const char* assignedTechniqueModeItems[] = { "Enable while group active", "Disable while group active" };
+				const char* assignedTechniqueModeItems[] = { "Inject at group shader" };
 				ImGui::Text("Effect mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.45f);
@@ -2074,7 +2074,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					group.setAssignedTechniqueMode(ToggleGroup::assignedTechniqueModeFromInt(assignedTechniqueMode));
 				}
 				ImGui::SameLine();
-				showHelpMarker("Choose whether assigned ReShade techniques turn ON or OFF while this toggle group is active.");
+				showHelpMarker("Assigned ReShade techniques are rendered at the first matching shader in this group each frame, instead of being toggled globally.");
 
 				for (size_t techniqueIndex = 0; techniqueIndex < group.getAssignedTechniqueNameCount(); ++techniqueIndex)
 				{

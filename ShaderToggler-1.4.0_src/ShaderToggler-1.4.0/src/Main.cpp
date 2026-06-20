@@ -301,7 +301,12 @@ static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* co
 			if (techniquesToInject.count(std::string(techniqueName)) == 0)
 				return;
 
+			// Preserve the user's normal ReShade technique enabled/disabled state.
+			// render_technique() should be used as an injection render only and must not
+			// leave the assigned effect globally disabled when the group is toggled off.
+			const bool previousTechniqueState = rt->get_technique_state(technique);
 			rt->render_technique(technique, commandList, activeRtv, activeRtv);
+			rt->set_technique_state(technique, previousTechniqueState);
 		});
 
 	g_isInjectingAssignedEffects = false;

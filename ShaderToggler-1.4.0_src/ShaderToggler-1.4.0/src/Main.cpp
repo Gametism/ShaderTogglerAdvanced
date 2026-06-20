@@ -977,6 +977,13 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 
 bool blockDrawCallForCommandList(command_list* commandList)
 {
+	// Do not run ShaderToggler blocking logic while ReShade effects are being rendered by the injection path.
+	// ReShade effect draws can re-enter draw callbacks; blocking them with stale game shader state can crash some titles.
+	if (g_isInjectingAssignedEffects)
+	{
+		return false;
+	}
+
 	if (nullptr == commandList)
 	{
 		return false;
@@ -2064,15 +2071,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::SameLine();
 				showHelpMarker("Assigned ReShade techniques are injected at the first matching shader of this group each frame. This is for placing effects before later layers like fog or HUD.");
 
-				int assignedTechniqueMode = ToggleGroup::assignedTechniqueModeToInt(group.getAssignedTechniqueMode());
-				const char* assignedTechniqueModeItems[] = { "Inject at group shader" };
+				group.setAssignedTechniqueMode(ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader);
 				ImGui::Text("Effect mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
-				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.45f);
-				if (ImGui::Combo("##AssignedTechniqueMode", &assignedTechniqueMode, assignedTechniqueModeItems, IM_ARRAYSIZE(assignedTechniqueModeItems)))
-				{
-					group.setAssignedTechniqueMode(ToggleGroup::assignedTechniqueModeFromInt(assignedTechniqueMode));
-				}
+				ImGui::TextUnformatted("Inject at group shader");
 				ImGui::SameLine();
 				showHelpMarker("Assigned ReShade techniques are rendered at the first matching shader in this group each frame, instead of being toggled globally.");
 

@@ -30,7 +30,8 @@ namespace ShaderToggler
 		enum class AssignedTechniqueMode
 		{
 			EnableWhileActive = 0,
-			DisableWhileActive = 1
+			DisableWhileActive = 1,
+			InjectAtGroupShader = 2
 		};
 
 		struct TimedTriggerBinding

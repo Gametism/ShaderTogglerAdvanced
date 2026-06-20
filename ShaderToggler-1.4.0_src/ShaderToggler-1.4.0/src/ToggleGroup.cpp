@@ -387,6 +387,8 @@ namespace ShaderToggler
 			return "Enable while group active";
 		case AssignedTechniqueMode::DisableWhileActive:
 			return "Disable while group active";
+		case AssignedTechniqueMode::InjectAtGroupShader:
+			return "Inject at group shader";
 		default:
 			return "Enable while group active";
 		}
@@ -403,6 +405,8 @@ namespace ShaderToggler
 		{
 		case 1:
 			return AssignedTechniqueMode::DisableWhileActive;
+		case 2:
+			return AssignedTechniqueMode::InjectAtGroupShader;
 		case 0:
 		default:
 			return AssignedTechniqueMode::EnableWhileActive;

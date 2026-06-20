@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <cctype>
+#include <utility>
 
 #ifdef min
 #undef min
@@ -89,6 +90,10 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLas
 static std::unordered_map<std::string, bool> g_assignedTechniqueOriginalState;
 static std::unordered_map<std::string, bool> g_assignedTechniqueLastAppliedState;
 static std::unordered_map<int, int> g_groupTechniqueComboIndex;
+static std::unordered_map<int, uint64_t> g_groupLastInjectedFrame;
+static reshade::api::effect_runtime* g_currentRuntime = nullptr;
+static std::atomic_bool g_isInjectingAssignedEffects = false;
+static uint64_t g_presentFrameCounter = 0;
 static const int g_groupHotkeyDebounceMs = 150;
 
 // 
@@ -283,6 +288,11 @@ static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 
 			assignedTechniqueNames.insert(techniqueName);
 
+			// Injection groups do not globally force technique states. They render assigned
+			// techniques at the group shader boundary inside draw callbacks instead.
+			if (group.getAssignedTechniqueMode() == ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader)
+				continue;
+
 			// Only active groups override assigned techniques. Inactive groups simply restore later.
 			if (!group.isActive())
 				continue;
@@ -360,6 +370,133 @@ static void applyAssignedTechniqueStates(reshade::api::effect_runtime* runtime)
 			g_assignedTechniqueLastAppliedState.erase(matchedKey);
 		}
 	});
+}
+
+
+static bool groupContainsShaderHash(const ToggleGroup& group, uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
+{
+	if (pixelHash != 0 && group.getPixelShaderHashes().count(pixelHash) != 0)
+		return true;
+
+	if (vertexHash != 0 && group.getVertexShaderHashes().count(vertexHash) != 0)
+		return true;
+
+	if (computeHash != 0 && group.getComputeShaderHashes().count(computeHash) != 0)
+		return true;
+
+	return false;
+}
+
+static bool anyInjectGroupMatchesCurrentShaders(uint32_t pixelHash, uint32_t vertexHash, uint32_t computeHash)
+{
+	for (const auto& group : g_toggleGroups)
+	{
+		if (!group.isActive())
+			continue;
+
+		if (group.getAssignedTechniqueMode() != ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader)
+			continue;
+
+		if (!group.hasAssignedTechniqueNames())
+			continue;
+
+		if (groupContainsShaderHash(group, pixelHash, vertexHash, computeHash))
+			return true;
+	}
+
+	return false;
+}
+
+static void renderAssignedTechniquesAtCurrentDraw(reshade::api::command_list* commandList,
+	uint32_t pixelHash,
+	uint32_t vertexHash,
+	uint32_t computeHash)
+{
+	if (commandList == nullptr || g_currentRuntime == nullptr)
+		return;
+
+	if (g_isInjectingAssignedEffects)
+		return;
+
+	if (commandList->get_device() != g_currentRuntime->get_device())
+		return;
+
+	std::vector<const ToggleGroup*> matchedGroups;
+	std::unordered_set<std::string> assignedTechniqueNames;
+
+	for (const auto& group : g_toggleGroups)
+	{
+		if (!group.isActive())
+			continue;
+
+		if (group.getAssignedTechniqueMode() != ToggleGroup::AssignedTechniqueMode::InjectAtGroupShader)
+			continue;
+
+		if (!group.hasAssignedTechniqueNames())
+			continue;
+
+		if (!groupContainsShaderHash(group, pixelHash, vertexHash, computeHash))
+			continue;
+
+		// Render each injection group only once per present. This keeps the first matching
+		// draw call as the boundary and prevents repeated effect passes for every later
+		// draw using the same shader.
+		auto injectedIt = g_groupLastInjectedFrame.find(group.getId());
+		if (injectedIt != g_groupLastInjectedFrame.end() && injectedIt->second == g_presentFrameCounter)
+			continue;
+
+		matchedGroups.push_back(&group);
+		for (const auto& techniqueName : group.getAssignedTechniqueNames())
+		{
+			if (!techniqueName.empty())
+				assignedTechniqueNames.insert(techniqueName);
+		}
+	}
+
+	if (matchedGroups.empty() || assignedTechniqueNames.empty())
+		return;
+
+	std::vector<reshade::api::effect_technique> techniquesToRender;
+	std::vector<std::pair<reshade::api::effect_technique, bool>> originalStates;
+
+	g_currentRuntime->enumerate_techniques(nullptr, [&assignedTechniqueNames, &techniquesToRender, &originalStates](reshade::api::effect_runtime* rt, reshade::api::effect_technique technique)
+	{
+		if (rt == nullptr)
+			return;
+
+		const std::string displayKey = getTechniqueDisplayKey(rt, technique);
+		const std::string legacyName = getTechniqueLegacyName(rt, technique);
+
+		std::string matchedKey;
+		const bool matched = assignedTechniqueMatches(assignedTechniqueNames, displayKey, legacyName, matchedKey);
+
+		const bool originalState = rt->get_technique_state(technique);
+		originalStates.push_back(std::make_pair(technique, originalState));
+
+		// Temporarily enable only the assigned techniques for this injection pass.
+		// Everything is restored immediately after render_effects returns.
+		rt->set_technique_state(technique, matched);
+
+		if (matched)
+			techniquesToRender.push_back(technique);
+	});
+
+	if (techniquesToRender.empty())
+	{
+		for (const auto& state : originalStates)
+			g_currentRuntime->set_technique_state(state.first, state.second);
+		return;
+	}
+
+	g_isInjectingAssignedEffects = true;
+	g_currentRuntime->render_effects(commandList, reshade::api::resource_view { 0 }, reshade::api::resource_view { 0 });
+	g_isInjectingAssignedEffects = false;
+
+	for (const auto& state : originalStates)
+		g_currentRuntime->set_technique_state(state.first, state.second);
+
+	for (const ToggleGroup* group : matchedGroups)
+		g_groupLastInjectedFrame[group->getId()] = g_presentFrameCounter;
 }
 
 static int getHotkeyLayoutSortPriority(const ToggleGroup& group)
@@ -1001,7 +1138,16 @@ bool blockDrawCallForCommandList(command_list* commandList)
 
 	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
 
-	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
+	const uint32_t activePixelShaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
+	const uint32_t activeVertexShaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
+	const uint32_t activeComputeShaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
+
+	if (!g_isInjectingAssignedEffects && anyInjectGroupMatchesCurrentShaders(activePixelShaderHash, activeVertexShaderHash, activeComputeShaderHash))
+	{
+		renderAssignedTechniquesAtCurrentDraw(commandList, activePixelShaderHash, activeVertexShaderHash, activeComputeShaderHash);
+	}
+
+	uint32_t shaderHash = activePixelShaderHash;
 	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
 	for (auto& group : g_toggleGroups)
 	{
@@ -1015,7 +1161,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		}
 	}
 
-	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
+	shaderHash = activeVertexShaderHash;
 	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
 	for (auto& group : g_toggleGroups)
 	{
@@ -1029,7 +1175,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		}
 	}
 
-	shaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
+	shaderHash = activeComputeShaderHash;
 	blockCall |= g_computeShaderManager.isBlockedShader(shaderHash);
 	for (auto& group : g_toggleGroups)
 	{
@@ -1072,6 +1218,9 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
+	g_currentRuntime = runtime;
+	++g_presentFrameCounter;
+
 	if (g_activeCollectorFrameCounter > 0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -2070,10 +2219,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 				ImGui::Text("Assigned ReShade effects");
 				ImGui::SameLine();
-				showHelpMarker("Assigned ReShade techniques are controlled by this group. This is still global technique control, not per-draw injection yet.");
+				showHelpMarker("Assigned ReShade techniques can either be globally enabled/disabled while this group is active, or injected at the first matching group shader each frame. Injection mode is experimental and intended for effects behind fog/HUD boundaries.");
 
 				int assignedTechniqueMode = ToggleGroup::assignedTechniqueModeToInt(group.getAssignedTechniqueMode());
-				const char* assignedTechniqueModeItems[] = { "Enable while group active", "Disable while group active" };
+				const char* assignedTechniqueModeItems[] = { "Enable while group active", "Disable while group active", "Inject at group shader" };
 				ImGui::Text("Effect mode");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.45f);
@@ -2283,6 +2432,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				g_groupTimedFadeOutStart.erase(id);
 				g_groupLastTimedSuppressionInputTime.erase(id);
 				g_groupTechniqueComboIndex.erase(id);
+				g_groupLastInjectedFrame.erase(id);
 			}
 
 			saveShaderTogglerIniFile();

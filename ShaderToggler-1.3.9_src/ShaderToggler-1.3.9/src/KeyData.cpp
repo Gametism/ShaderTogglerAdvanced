@@ -493,7 +493,7 @@ namespace ShaderToggler
 			   ((prevState.Gamepad.wButtons & mask) == 0);
 	}
 
-	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime)
+	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime, bool allowMouseButtons)
 	{
 		const uint8_t mouseCandidates[] =
 		{
@@ -504,33 +504,36 @@ namespace ShaderToggler
 			VK_XBUTTON2
 		};
 
-		bool anyMouseButtonDown = false;
-		for (const uint8_t mouseCode : mouseCandidates)
+		if (allowMouseButtons)
 		{
-			if (runtime->is_key_down(mouseCode))
-			{
-				anyMouseButtonDown = true;
-				break;
-			}
-		}
-
-		if (!_mouseBindingCollectionArmed)
-		{
-			if (!anyMouseButtonDown)
-				_mouseBindingCollectionArmed = true;
-		}
-		else
-		{
+			bool anyMouseButtonDown = false;
 			for (const uint8_t mouseCode : mouseCandidates)
 			{
 				if (runtime->is_key_down(mouseCode))
 				{
-					_keyCode = mouseCode;
-					_altRequired = runtime->is_key_down(VK_MENU);
-					_ctrlRequired = runtime->is_key_down(VK_CONTROL);
-					_shiftRequired = runtime->is_key_down(VK_SHIFT);
-					setKeyAsString();
-					return;
+					anyMouseButtonDown = true;
+					break;
+				}
+			}
+
+			if (!_mouseBindingCollectionArmed)
+			{
+				if (!anyMouseButtonDown)
+					_mouseBindingCollectionArmed = true;
+			}
+			else
+			{
+				for (const uint8_t mouseCode : mouseCandidates)
+				{
+					if (runtime->is_key_down(mouseCode))
+					{
+						_keyCode = mouseCode;
+						_altRequired = runtime->is_key_down(VK_MENU);
+						_ctrlRequired = runtime->is_key_down(VK_CONTROL);
+						_shiftRequired = runtime->is_key_down(VK_SHIFT);
+						setKeyAsString();
+						return;
+					}
 				}
 			}
 		}

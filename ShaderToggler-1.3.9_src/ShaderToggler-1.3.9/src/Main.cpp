@@ -2189,7 +2189,17 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
 		g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
 	{
-		g_keyCollector.collectKeysPressed(runtime);
+		// Do not capture a mouse button while it is being used on an ImGui
+		// control. ImGui buttons activate on release, so checking only after
+		// the OK button closes the editor is too late: the preceding
+		// mouse-down frame could already replace the selected hotkey.
+		const bool mouseIsInteractingWithInterface =
+			ImGui::IsAnyItemHovered() ||
+			ImGui::IsAnyItemActive();
+
+		g_keyCollector.collectKeysPressed(
+			runtime,
+			!mouseIsInteractingWithInterface);
 	}
 }
 

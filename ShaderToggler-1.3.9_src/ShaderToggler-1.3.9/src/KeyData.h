@@ -38,7 +38,7 @@ namespace ShaderToggler
 		uint32_t getKeyForIniFile() const;
 		void clear();
 		void prepareForBindingCollection();
-		void collectKeysPressed(const reshade::api::effect_runtime* runtime);
+		void collectKeysPressed(const reshade::api::effect_runtime* runtime, bool allowMouseButtons = true);
 
 		static void setMouseHotkeysBlocked(bool blocked);
 

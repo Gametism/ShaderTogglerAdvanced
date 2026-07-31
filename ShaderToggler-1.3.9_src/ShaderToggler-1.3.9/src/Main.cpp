@@ -84,6 +84,7 @@ static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLas
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedVisibleSince;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupTimedFadeOutStart;
 static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupLastTimedSuppressionInputTime;
+static std::unordered_map<int, std::chrono::steady_clock::time_point> g_groupStartupActivationStartTime;
 static const int g_groupHotkeyDebounceMs = 150;
 
 // 
@@ -384,6 +385,8 @@ static std::string buildIniSignature()
 		data += "|Name=" + group.getName();
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
+		data += "|StartupTimed=" + std::to_string(group.isStartupTimed() ? 1 : 0);
+		data += "|StartupDurationMs=" + std::to_string(group.getStartupDurationMs());
 		data += "|Hold=" + std::to_string(group.isHoldMode() ? 1 : 0);
 		data += "|HoldInverted=" + std::to_string(group.isHoldInverted() ? 1 : 0);
 		data += "|Timed=" + std::to_string(group.isTimedMode() ? 1 : 0);
@@ -527,7 +530,7 @@ static void applyModernUiStyle()
 
 	g_uiStyleInitialized = true;
 }
-
+//GT
 void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
@@ -554,7 +557,7 @@ void loadShaderTogglerIniFile()
 
 	const int savedControllerMode = iniFile.GetInt("ControllerLabelMode", "General");
 	if (savedControllerMode >= static_cast<int>(KeyData::ControllerLabelMode::Auto) &&
-		savedControllerMode <= static_cast<int>(KeyData::ControllerLabelMode::PlayStation))
+		savedControllerMode <= static_cast<int>(KeyData::ControllerLabelMode::Nintendo))
 	{
 		KeyData::setControllerLabelMode(static_cast<KeyData::ControllerLabelMode>(savedControllerMode));
 	}
@@ -578,6 +581,9 @@ void loadShaderTogglerIniFile()
 		addDefaultGroup();
 		g_toggleGroups[0].loadState(iniFile, -1, false);
 		saveShaderTogglerIniFile();
+		g_groupStartupActivationStartTime.clear();
+		if (g_toggleGroups[0].isActiveAtStartup() && g_toggleGroups[0].isStartupTimed())
+			g_groupStartupActivationStartTime[g_toggleGroups[0].getId()] = std::chrono::steady_clock::now();
 		return;
 	}
 
@@ -609,6 +615,14 @@ void loadShaderTogglerIniFile()
 		{
 			saveShaderTogglerIniFile();
 		}
+	}
+
+	g_groupStartupActivationStartTime.clear();
+	const auto startupNow = std::chrono::steady_clock::now();
+	for (const auto& group : g_toggleGroups)
+	{
+		if (group.isActiveAtStartup() && group.isStartupTimed())
+			g_groupStartupActivationStartTime[group.getId()] = startupNow;
 	}
 }
 
@@ -884,6 +898,11 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
+	const bool mouseCapturedByOverlay =
+		ImGui::GetCurrentContext() != nullptr &&
+		ImGui::GetIO().WantCaptureMouse;
+	KeyData::setMouseHotkeysBlocked(mouseCapturedByOverlay);
+
 	if (g_activeCollectorFrameCounter > 0)
 	{
 		--g_activeCollectorFrameCounter;
@@ -891,8 +910,22 @@ static void onReshadePresent(effect_runtime* runtime)
 
 	for (auto& group : g_toggleGroups)
 	{
-		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
 		const auto nowTime = std::chrono::steady_clock::now();
+
+		auto startupTimerIt = g_groupStartupActivationStartTime.find(group.getId());
+		if (startupTimerIt != g_groupStartupActivationStartTime.end())
+		{
+			const auto startupElapsedMs =
+				std::chrono::duration_cast<std::chrono::milliseconds>(nowTime - startupTimerIt->second).count();
+
+			if (startupElapsedMs >= group.getStartupDurationMs())
+			{
+				setGroupActiveWithEditRefresh(group, false);
+				g_groupStartupActivationStartTime.erase(startupTimerIt);
+			}
+		}
+
+		const bool isDownNow = group.getToggleKey().isKeyDown(runtime);
 
 		const bool timedSuppressionKeyDownNow = isAnyTimedSuppressionKeyDown(group, runtime);
 		if (timedSuppressionKeyDownNow)
@@ -1234,6 +1267,7 @@ void startKeyBindingEditing(ToggleGroup& groupEditing)
 		g_keyCollector.clear();
 	}
 	g_toggleGroupIdKeyBindingEditing = groupEditing.getId();
+	g_keyCollector.prepareForBindingCollection();
 }
 
 void endTimedTriggerKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
@@ -1283,6 +1317,7 @@ void startTimedTriggerKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex
 	}
 	g_toggleGroupIdTimedTriggerKeyEditing = groupEditing.getId();
 	g_toggleGroupTimedTriggerKeySlotEditing = slotIndex;
+	g_keyCollector.prepareForBindingCollection();
 }
 
 void endTimedSuppressionKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing)
@@ -1330,6 +1365,7 @@ void startTimedSuppressionKeyBindingEditing(ToggleGroup& groupEditing, int slotI
 
 	g_toggleGroupIdTimedSuppressionKeyEditing = groupEditing.getId();
 	g_toggleGroupTimedSuppressionKeySlotEditing = slotIndex;
+	g_keyCollector.prepareForBindingCollection();
 }
 
 void endShaderEditing(bool acceptCollectedShaderHashes, ToggleGroup& groupEditing)
@@ -1424,7 +1460,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		showHelpMarker("Increase this if the shader you want only appears occasionally.");
 
 		int controllerMode = static_cast<int>(KeyData::getControllerLabelMode());
-		const char* controllerModeItems[] = { "Auto", "Xbox", "PlayStation" };
+		const char* controllerModeItems[] = { "Auto", "Xbox", "PlayStation", "Nintendo" };
 		if (ImGui::Combo("Controller labels", &controllerMode, controllerModeItems, IM_ARRAYSIZE(controllerModeItems)))
 		{
 			KeyData::setControllerLabelMode(static_cast<KeyData::ControllerLabelMode>(controllerMode));
@@ -1436,7 +1472,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		if (KeyData::getControllerLabelMode() == KeyData::ControllerLabelMode::Auto)
 		{
 			KeyData::refreshControllerTypeDetection();
-			if (KeyData::isPlayStationControllerDetected())
+			if (KeyData::isNintendoControllerDetected())
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+				ImGui::TextUnformatted("Detected controller labels: Nintendo");
+				ImGui::PopStyleColor();
+			}
+			else if (KeyData::isPlayStationControllerDetected())
 			{
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 				ImGui::TextUnformatted("Detected controller labels: PlayStation");
@@ -1450,6 +1492,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		else if (KeyData::getControllerLabelMode() == KeyData::ControllerLabelMode::PlayStation)
 		{
 			ImGui::TextUnformatted("Controller labels are forced to PlayStation");
+		}
+		else if (KeyData::getControllerLabelMode() == KeyData::ControllerLabelMode::Nintendo)
+		{
+			ImGui::TextUnformatted("Controller labels are forced to Nintendo");
 		}
 		else
 		{
@@ -1594,7 +1640,10 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			if (group.isActiveAtStartup())
 			{
 				ImGui::SameLine();
-				ImGui::Text(" (Active at startup)");
+				if (group.isStartupTimed())
+					ImGui::Text(" (Active at startup: %.1f s)", group.getStartupDurationMs() / 1000.0f);
+				else
+					ImGui::Text(" (Active at startup)");
 			}
 
 			if (group.isEditing())
@@ -1882,9 +1931,50 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::Text(" ");
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				bool isDefaultActive = group.isActiveAtStartup();
-				ImGui::Checkbox("Is active at startup", &isDefaultActive);
-				group.setIsActiveAtStartup(isDefaultActive);
+				if (ImGui::Checkbox("Is active at startup", &isDefaultActive))
+				{
+					group.setIsActiveAtStartup(isDefaultActive);
+				}
+				ImGui::SameLine();
+				showHelpMarker("Activates this group automatically when the game starts.");
 				ImGui::PopItemWidth();
+
+				if (group.isActiveAtStartup())
+				{
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+					ImGui::Text(" ");
+					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+					bool startupTimed = group.isStartupTimed();
+					if (ImGui::Checkbox("Deactivate automatically", &startupTimed))
+					{
+						group.setStartupTimed(startupTimed);
+					}
+					ImGui::SameLine();
+					showHelpMarker("When enabled, the startup activation ends automatically after the configured duration.");
+					ImGui::PopItemWidth();
+
+					if (group.isStartupTimed())
+					{
+						ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.25f);
+						ImGui::Text("Startup duration");
+						ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+						float startupDurationSeconds = group.getStartupDurationMs() / 1000.0f;
+						if (ImGui::InputFloat("##Startup duration", &startupDurationSeconds, 1.0f, 5.0f, "%.1f"))
+						{
+							if (startupDurationSeconds < 0.1f)
+								startupDurationSeconds = 0.1f;
+							if (startupDurationSeconds > 3600.0f)
+								startupDurationSeconds = 3600.0f;
+
+							group.setStartupDurationMs(static_cast<int>(startupDurationSeconds * 1000.0f));
+						}
+						ImGui::SameLine();
+						ImGui::TextUnformatted("seconds");
+						ImGui::SameLine();
+						showHelpMarker("The group starts active and turns off once this amount of time has passed. The timer runs only once per game launch.");
+						ImGui::PopItemWidth();
+					}
+				}
 
 				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
 				ImGui::Text(" ");
@@ -2161,3 +2251,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 
 	return TRUE;
 }
+//GT

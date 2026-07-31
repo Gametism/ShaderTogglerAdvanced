@@ -6,7 +6,7 @@
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
-
+//GT
 namespace ShaderToggler
 {
 	//
@@ -49,6 +49,12 @@ namespace ShaderToggler
 
 		bool isActiveAtStartup() const;
 		void setIsActiveAtStartup(bool startup);
+
+		bool isStartupTimed() const;
+		void setStartupTimed(bool timed);
+
+		int getStartupDurationMs() const;
+		void setStartupDurationMs(int durationMs);
 
 		bool isEditing() const;
 		void setEditing(bool editing);
@@ -136,6 +142,8 @@ namespace ShaderToggler
 		std::string m_name;
 		bool m_active;
 		bool m_activeAtStartup;
+		bool m_startupTimed;
+		int m_startupDurationMs;
 		bool m_editing;
 		bool m_holdMode;
 		bool m_holdInverted;

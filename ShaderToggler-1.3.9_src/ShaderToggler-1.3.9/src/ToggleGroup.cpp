@@ -20,12 +20,14 @@ namespace ShaderToggler
 	}
 
 	static ToggleGroup::GroupId s_nextGroupId = 1;
-
+//GT
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
 		: m_id(id)
 		, m_name(name)
 		, m_active(false)
 		, m_activeAtStartup(false)
+		, m_startupTimed(false)
+		, m_startupDurationMs(30000)
 		, m_editing(false)
 		, m_holdMode(false)
 		, m_holdInverted(false)
@@ -55,6 +57,23 @@ namespace ShaderToggler
 
 	bool ToggleGroup::isActiveAtStartup() const { return m_activeAtStartup; }
 	void ToggleGroup::setIsActiveAtStartup(bool startup) { m_activeAtStartup = startup; }
+
+	bool ToggleGroup::isStartupTimed() const { return m_startupTimed; }
+	void ToggleGroup::setStartupTimed(bool timed)
+	{
+		m_startupTimed = timed;
+	}
+
+	int ToggleGroup::getStartupDurationMs() const { return m_startupDurationMs; }
+	void ToggleGroup::setStartupDurationMs(int durationMs)
+	{
+		if (durationMs < 100)
+			durationMs = 100;
+		if (durationMs > 3600000)
+			durationMs = 3600000;
+
+		m_startupDurationMs = durationMs;
+	}
 
 	bool ToggleGroup::isEditing() const { return m_editing; }
 	void ToggleGroup::setEditing(bool editing) { m_editing = editing; }
@@ -380,6 +399,8 @@ namespace ShaderToggler
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
+		m_startupTimed = false;
+		m_startupDurationMs = 30000;
 		m_holdMode = false;
 		m_holdInverted = false;
 		m_timedMode = false;
@@ -419,6 +440,8 @@ namespace ShaderToggler
 
 			m_name = "Default";
 			m_activeAtStartup = false;
+			m_startupTimed = false;
+			m_startupDurationMs = 30000;
 			m_holdMode = false;
 			m_holdInverted = false;
 			m_timedMode = false;
@@ -522,6 +545,18 @@ namespace ShaderToggler
 
 		m_activeAtStartup = iniFile.GetBool("IsActiveAtStartup", sectionRoot);
 		m_active = m_activeAtStartup;
+
+		const std::string startupTimedValue = iniFile.GetValue("StartupTimed", sectionRoot);
+		if (!startupTimedValue.empty())
+			m_startupTimed = iniFile.GetBool("StartupTimed", sectionRoot);
+		else
+			m_startupTimed = false;
+
+		const int startupDurationValue = iniFile.GetInt("StartupDurationMs", sectionRoot);
+		if (startupDurationValue != INT_MIN)
+			setStartupDurationMs(startupDurationValue);
+		else
+			m_startupDurationMs = 30000;
 
 		const std::string holdModeValue = iniFile.GetValue("HoldMode", sectionRoot);
 		if (!holdModeValue.empty())
@@ -646,6 +681,8 @@ namespace ShaderToggler
 		}
 
 		iniFile.SetBool("IsActiveAtStartup", m_activeAtStartup, "", sectionRoot);
+		iniFile.SetBool("StartupTimed", m_startupTimed, "", sectionRoot);
+		iniFile.SetInt("StartupDurationMs", m_startupDurationMs, "", sectionRoot);
 		iniFile.SetBool("HoldMode", m_holdMode, "", sectionRoot);
 		iniFile.SetBool("HoldInverted", m_holdInverted, "", sectionRoot);
 		iniFile.SetBool("TimedMode", m_timedMode, "", sectionRoot);

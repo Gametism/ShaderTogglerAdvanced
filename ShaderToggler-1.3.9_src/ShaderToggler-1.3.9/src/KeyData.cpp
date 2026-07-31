@@ -7,15 +7,10 @@
 /////////////////////////////////////////////////////////////////////////GT
 
 #include "KeyData.h"
-#include <Xinput.h>
+#include "ControllerManager.h"
 #include <Windows.h>
-#include <cfgmgr32.h>
 #include <string>
-#include <vector>
-#include <cwchar>
-#include <cstring>
 //GT
-#pragma comment(lib, "Cfgmgr32.lib")
 
 namespace ShaderToggler
 {
@@ -30,177 +25,40 @@ namespace ShaderToggler
 			return STA_KEYDATA_UNIT_TAG_B;
 		}
 
-		// Custom codes stored in the normal 8-bit key slot
-		constexpr uint8_t GPAD_A          = 240;
-		constexpr uint8_t GPAD_B          = 241;
-		constexpr uint8_t GPAD_X          = 242;
-		constexpr uint8_t GPAD_Y          = 243;
-		constexpr uint8_t GPAD_LB         = 244;
-		constexpr uint8_t GPAD_RB         = 245;
-		constexpr uint8_t GPAD_BACK       = 246;
-		constexpr uint8_t GPAD_START      = 247;
-		constexpr uint8_t GPAD_LS         = 248;
-		constexpr uint8_t GPAD_RS         = 249;
-		constexpr uint8_t GPAD_DPAD_UP    = 250;
-		constexpr uint8_t GPAD_DPAD_DOWN  = 251;
-		constexpr uint8_t GPAD_DPAD_LEFT  = 252;
-		constexpr uint8_t GPAD_DPAD_RIGHT = 253;
-		constexpr uint8_t GPAD_LT         = 254;
-		constexpr uint8_t GPAD_RT         = 255;
-
-		constexpr BYTE GPAD_TRIGGER_THRESHOLD = 30;
-		constexpr DWORD CONTROLLER_DETECT_REFRESH_MS = 3000;
-
-		using XInputGetStateFunc = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
-
-		static HMODULE s_xinputModule = nullptr;
-		static XInputGetStateFunc s_xinputGetState = nullptr;
-		static bool s_xinputInitialized = false;
-
-		static void initializeXInput()
-		{
-			if (s_xinputInitialized)
-				return;
-
-			s_xinputInitialized = true;
-
-			static const wchar_t* dllNames[] =
-			{
-				L"xinput1_4.dll",
-				L"xinput1_3.dll",
-				L"xinput9_1_0.dll"
-			};
-
-			for (const wchar_t* dllName : dllNames)
-			{
-				HMODULE module = LoadLibraryW(dllName);
-				if (module == nullptr)
-					continue;
-
-				auto proc = reinterpret_cast<XInputGetStateFunc>(GetProcAddress(module, "XInputGetState"));
-				if (proc != nullptr)
-				{
-					s_xinputModule = module;
-					s_xinputGetState = proc;
-					return;
-				}
-
-				FreeLibrary(module);
-			}
-		}
-
-		static bool tryGetXInputState(DWORD userIndex, XINPUT_STATE& state)
-		{
-			initializeXInput();
-
-			if (s_xinputGetState == nullptr)
-				return false;
-
-			ZeroMemory(&state, sizeof(state));
-			return s_xinputGetState(userIndex, &state) == ERROR_SUCCESS;
-		}
-
-		static bool pollGamepadState(XINPUT_STATE& previousState, XINPUT_STATE& currentState)
-		{
-			static DWORD s_lastPollTick = 0;
-			static XINPUT_STATE s_prevState = {};
-			static XINPUT_STATE s_currState = {};
-
-			const DWORD nowTick = GetTickCount();
-			if (nowTick != s_lastPollTick)
-			{
-				s_prevState = s_currState;
-
-				XINPUT_STATE state = {};
-				if (tryGetXInputState(0, state))
-				{
-					s_currState = state;
-				}
-				else
-				{
-					ZeroMemory(&s_currState, sizeof(s_currState));
-				}
-
-				s_lastPollTick = nowTick;
-			}
-
-			previousState = s_prevState;
-			currentState = s_currState;
-			return true;
-		}
 //GT
-		static WORD gamepadCodeToButtonMask(uint8_t code)
-		{
-			switch (code)
-			{
-			case GPAD_A:          return XINPUT_GAMEPAD_A;
-			case GPAD_B:          return XINPUT_GAMEPAD_B;
-			case GPAD_X:          return XINPUT_GAMEPAD_X;
-			case GPAD_Y:          return XINPUT_GAMEPAD_Y;
-			case GPAD_LB:         return XINPUT_GAMEPAD_LEFT_SHOULDER;
-			case GPAD_RB:         return XINPUT_GAMEPAD_RIGHT_SHOULDER;
-			case GPAD_BACK:       return XINPUT_GAMEPAD_BACK;
-			case GPAD_START:      return XINPUT_GAMEPAD_START;
-			case GPAD_LS:         return XINPUT_GAMEPAD_LEFT_THUMB;
-			case GPAD_RS:         return XINPUT_GAMEPAD_RIGHT_THUMB;
-			case GPAD_DPAD_UP:    return XINPUT_GAMEPAD_DPAD_UP;
-			case GPAD_DPAD_DOWN:  return XINPUT_GAMEPAD_DPAD_DOWN;
-			case GPAD_DPAD_LEFT:  return XINPUT_GAMEPAD_DPAD_LEFT;
-			case GPAD_DPAD_RIGHT: return XINPUT_GAMEPAD_DPAD_RIGHT;
-			default:              return 0;
-			}
-		}
+		constexpr uint8_t GPAD_A          = ControllerManager::GPAD_A;
+		constexpr uint8_t GPAD_B          = ControllerManager::GPAD_B;
+		constexpr uint8_t GPAD_X          = ControllerManager::GPAD_X;
+		constexpr uint8_t GPAD_Y          = ControllerManager::GPAD_Y;
+		constexpr uint8_t GPAD_LB         = ControllerManager::GPAD_LB;
+		constexpr uint8_t GPAD_RB         = ControllerManager::GPAD_RB;
+		constexpr uint8_t GPAD_BACK       = ControllerManager::GPAD_BACK;
+		constexpr uint8_t GPAD_START      = ControllerManager::GPAD_START;
+		constexpr uint8_t GPAD_LS         = ControllerManager::GPAD_LS;
+		constexpr uint8_t GPAD_RS         = ControllerManager::GPAD_RS;
+		constexpr uint8_t GPAD_DPAD_UP    = ControllerManager::GPAD_DPAD_UP;
+		constexpr uint8_t GPAD_DPAD_DOWN  = ControllerManager::GPAD_DPAD_DOWN;
+		constexpr uint8_t GPAD_DPAD_LEFT  = ControllerManager::GPAD_DPAD_LEFT;
+		constexpr uint8_t GPAD_DPAD_RIGHT = ControllerManager::GPAD_DPAD_RIGHT;
+		constexpr uint8_t GPAD_LT         = ControllerManager::GPAD_LT;
+		constexpr uint8_t GPAD_RT         = ControllerManager::GPAD_RT;
 
-		static std::string toLowerAscii(const std::string& input)
-		{
-			std::string out = input;
-			for (char& c : out)
-			{
-				if (c >= 'A' && c <= 'Z')
-					c = static_cast<char>(c - 'A' + 'a');
-			}
-			return out;
-		}
-
-		static bool containsInsensitive(const std::string& haystack, const char* needle)
-		{
-			const std::string lowerHaystack = toLowerAscii(haystack);
-			const std::string lowerNeedle = toLowerAscii(std::string(needle));
-			return lowerHaystack.find(lowerNeedle) != std::string::npos;
-		}
-
-		static std::string wideToUtf8(const wchar_t* text)
-		{
-			if (text == nullptr || *text == L'\0')
-				return std::string();
-
-			const int required = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
-			if (required <= 1)
-				return std::string();
-
-			std::vector<char> buffer(static_cast<size_t>(required), '\0');
-			WideCharToMultiByte(CP_UTF8, 0, text, -1, buffer.data(), required, nullptr, nullptr);
-			return std::string(buffer.data());
-		}
-
-		static bool looksLikePlayStationDeviceString(const std::string& deviceText)
-		{
-			return
-				containsInsensitive(deviceText, "sony") ||
-				containsInsensitive(deviceText, "playstation") ||
-				containsInsensitive(deviceText, "dualshock") ||
-				containsInsensitive(deviceText, "dualsense") ||
-				containsInsensitive(deviceText, "wireless controller") ||
-				containsInsensitive(deviceText, "vid_054c");
-		}
+		constexpr DWORD CONTROLLER_DETECT_REFRESH_MS = 3000;
 	}
 
 	KeyData::ControllerLabelMode KeyData::s_controllerLabelMode = KeyData::ControllerLabelMode::Auto;
 	bool KeyData::s_cachedPlayStationDetected = false;
+	bool KeyData::s_cachedNintendoDetected = false;
 	DWORD KeyData::s_lastControllerDetectTick = 0;
 	KeyData::GlobalHotkeyModifier KeyData::s_globalHotkeyModifier = KeyData::GlobalHotkeyModifier::None;
+	bool KeyData::s_mouseHotkeysBlocked = false;
 
-	KeyData::KeyData() : _keyCode(0), _shiftRequired(false), _altRequired(false), _ctrlRequired(false)
+	KeyData::KeyData()
+		: _keyCode(0)
+		, _shiftRequired(false)
+		, _altRequired(false)
+		, _ctrlRequired(false)
+		, _mouseBindingCollectionArmed(false)
 	{
 		(void)preserve_keydata_provenance();
 		setKeyAsString();
@@ -236,34 +94,40 @@ namespace ShaderToggler
 		return s_cachedPlayStationDetected;
 	}
 
+	bool KeyData::isNintendoControllerDetected()
+	{
+		if (s_controllerLabelMode == ControllerLabelMode::Nintendo)
+			return true;
+		if (s_controllerLabelMode == ControllerLabelMode::Xbox ||
+			s_controllerLabelMode == ControllerLabelMode::PlayStation)
+		{
+			return false;
+		}
+
+		const DWORD now = GetTickCount();
+		if (now - s_lastControllerDetectTick > CONTROLLER_DETECT_REFRESH_MS)
+		{
+			refreshControllerTypeDetection();
+		}
+
+		return s_cachedNintendoDetected;
+	}
+
 	void KeyData::refreshControllerTypeDetection()
 	{
 		s_cachedPlayStationDetected = detectPlayStationController();
+		s_cachedNintendoDetected = detectNintendoController();
 		s_lastControllerDetectTick = GetTickCount();
 	}
 
 	bool KeyData::detectPlayStationController()
 	{
-		XINPUT_STATE state = {};
-		if (!tryGetXInputState(0, state))
-			return false;
+		return ControllerManager::isPlayStationControllerDetected();
+	}
 
-		ULONG charCount = 0;
-		if (CM_Get_Device_ID_List_SizeW(&charCount, nullptr, CM_GETIDLIST_FILTER_PRESENT) != CR_SUCCESS || charCount == 0)
-			return false;
-
-		std::vector<wchar_t> deviceList(static_cast<size_t>(charCount) + 2, L'\0');
-		if (CM_Get_Device_ID_ListW(nullptr, deviceList.data(), static_cast<ULONG>(deviceList.size()), CM_GETIDLIST_FILTER_PRESENT) != CR_SUCCESS)
-			return false;
-
-		for (const wchar_t* current = deviceList.data(); *current != L'\0'; current += std::wcslen(current) + 1)
-		{
-			const std::string deviceId = wideToUtf8(current);
-			if (looksLikePlayStationDeviceString(deviceId))
-				return true;
-		}
-
-		return false;
+	bool KeyData::detectNintendoController()
+	{
+		return ControllerManager::isNintendoControllerDetected();
 	}
 // 01000111 01100001 01101101 01100101 01110100 01101001 01110011 01101101 00001010
 	bool KeyData::shouldUsePlayStationLabels()
@@ -273,11 +137,32 @@ namespace ShaderToggler
 		case ControllerLabelMode::PlayStation:
 			return true;
 		case ControllerLabelMode::Xbox:
+		case ControllerLabelMode::Nintendo:
 			return false;
 		case ControllerLabelMode::Auto:
 		default:
-			return isPlayStationControllerDetected();
+			return isPlayStationControllerDetected() && !isNintendoControllerDetected();
 		}
+	}
+
+	bool KeyData::shouldUseNintendoLabels()
+	{
+		switch (s_controllerLabelMode)
+		{
+		case ControllerLabelMode::Nintendo:
+			return true;
+		case ControllerLabelMode::Xbox:
+		case ControllerLabelMode::PlayStation:
+			return false;
+		case ControllerLabelMode::Auto:
+		default:
+			return isNintendoControllerDetected();
+		}
+	}
+
+	void KeyData::setMouseHotkeysBlocked(bool blocked)
+	{
+		s_mouseHotkeysBlocked = blocked;
 	}
 
 	void KeyData::setGlobalHotkeyModifier(GlobalHotkeyModifier modifier)
@@ -414,7 +299,14 @@ namespace ShaderToggler
 		_ctrlRequired = false;
 		_shiftRequired = false;
 		_keyCode = 0;
+		_mouseBindingCollectionArmed = false;
 		setKeyAsString();
+	}
+
+	void KeyData::prepareForBindingCollection()
+	{
+		clear();
+		_mouseBindingCollectionArmed = false;
 	}
 
 	bool KeyData::isGamepadCode(uint8_t code)
@@ -422,57 +314,78 @@ namespace ShaderToggler
 		return code >= GPAD_A;
 	}
 
+	bool KeyData::isMouseCode(uint8_t code)
+	{
+		return code == VK_LBUTTON ||
+			   code == VK_RBUTTON ||
+			   code == VK_MBUTTON ||
+			   code == VK_XBUTTON1 ||
+			   code == VK_XBUTTON2;
+	}
+
 	bool KeyData::isGamepadButtonDown(uint8_t code)
 	{
-		XINPUT_STATE prevState = {};
-		XINPUT_STATE currState = {};
-		pollGamepadState(prevState, currState);
-
-		if (code == GPAD_LT)
-			return currState.Gamepad.bLeftTrigger > GPAD_TRIGGER_THRESHOLD;
-
-		if (code == GPAD_RT)
-			return currState.Gamepad.bRightTrigger > GPAD_TRIGGER_THRESHOLD;
-
-		const WORD mask = gamepadCodeToButtonMask(code);
-		if (mask == 0)
-			return false;
-
-		return (currState.Gamepad.wButtons & mask) != 0;
+		return ControllerManager::isButtonDown(code);
 	}
 
 	bool KeyData::isGamepadButtonPressed(uint8_t code)
 	{
-		XINPUT_STATE prevState = {};
-		XINPUT_STATE currState = {};
-		pollGamepadState(prevState, currState);
-
-		if (code == GPAD_LT)
-		{
-			return currState.Gamepad.bLeftTrigger > GPAD_TRIGGER_THRESHOLD &&
-				   prevState.Gamepad.bLeftTrigger <= GPAD_TRIGGER_THRESHOLD;
-		}
-
-		if (code == GPAD_RT)
-		{
-			return currState.Gamepad.bRightTrigger > GPAD_TRIGGER_THRESHOLD &&
-				   prevState.Gamepad.bRightTrigger <= GPAD_TRIGGER_THRESHOLD;
-		}
-
-		const WORD mask = gamepadCodeToButtonMask(code);
-		if (mask == 0)
-			return false;
-
-		return ((currState.Gamepad.wButtons & mask) != 0) &&
-			   ((prevState.Gamepad.wButtons & mask) == 0);
+		return ControllerManager::isButtonPressed(code);
 	}
 
 	void KeyData::collectKeysPressed(const reshade::api::effect_runtime* runtime)
 	{
+		const uint8_t mouseCandidates[] =
+		{
+			VK_LBUTTON,
+			VK_RBUTTON,
+			VK_MBUTTON,
+			VK_XBUTTON1,
+			VK_XBUTTON2
+		};
+
+		bool anyMouseButtonDown = false;
+		for (const uint8_t mouseCode : mouseCandidates)
+		{
+			if (runtime->is_key_down(mouseCode))
+			{
+				anyMouseButtonDown = true;
+				break;
+			}
+		}
+
+		// The click that opens a binding editor must never become the binding.
+		// Mouse collection is armed only after every supported mouse button has
+		// been released once while the binding editor is open.
+		if (!_mouseBindingCollectionArmed)
+		{
+			if (!anyMouseButtonDown)
+				_mouseBindingCollectionArmed = true;
+		}
+		else
+		{
+			for (const uint8_t mouseCode : mouseCandidates)
+			{
+				if (runtime->is_key_down(mouseCode))
+				{
+					_keyCode = mouseCode;
+					_altRequired = runtime->is_key_down(VK_MENU);
+					_ctrlRequired = runtime->is_key_down(VK_CONTROL);
+					_shiftRequired = runtime->is_key_down(VK_SHIFT);
+					setKeyAsString();
+					return;
+				}
+			}
+		}
+
 		for (int i = 2; i < 256; i++)
 		{
 			switch (i)
 			{
+			case VK_RBUTTON:
+			case VK_MBUTTON:
+			case VK_XBUTTON1:
+			case VK_XBUTTON2:
 			case VK_MENU:
 			case VK_CONTROL:
 			case VK_SHIFT:
@@ -528,6 +441,11 @@ namespace ShaderToggler
 			return isGamepadButtonPressed(_keyCode);
 		}
 
+		if (isMouseCode(_keyCode) && s_mouseHotkeysBlocked)
+		{
+			return false;
+		}
+
 		bool toReturn = runtime->is_key_pressed(_keyCode);
 		const bool altPressed = runtime->is_key_down(VK_MENU);
 		const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
@@ -546,25 +464,62 @@ namespace ShaderToggler
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
 		const bool usePlayStationLabels = shouldUsePlayStationLabels();
+		const bool useNintendoLabels = shouldUseNintendoLabels();
 
 		switch (vkCode)
 		{
-		case GPAD_A:          return usePlayStationLabels ? "Gamepad Cross" : "Gamepad A";
-		case GPAD_B:          return usePlayStationLabels ? "Gamepad Circle" : "Gamepad B";
-		case GPAD_X:          return usePlayStationLabels ? "Gamepad Square" : "Gamepad X";
-		case GPAD_Y:          return usePlayStationLabels ? "Gamepad Triangle" : "Gamepad Y";
-		case GPAD_LB:         return usePlayStationLabels ? "Gamepad L1" : "Gamepad LB";
-		case GPAD_RB:         return usePlayStationLabels ? "Gamepad R1" : "Gamepad RB";
-		case GPAD_BACK:       return usePlayStationLabels ? "Gamepad Share" : "Gamepad Back";
-		case GPAD_START:      return usePlayStationLabels ? "Gamepad Options" : "Gamepad Start";
-		case GPAD_LS:         return usePlayStationLabels ? "Gamepad L3" : "Gamepad LS";
-		case GPAD_RS:         return usePlayStationLabels ? "Gamepad R3" : "Gamepad RS";
+		case GPAD_A:
+			if (usePlayStationLabels) return "Gamepad Cross";
+			if (useNintendoLabels) return "Gamepad B";
+			return "Gamepad A";
+		case GPAD_B:
+			if (usePlayStationLabels) return "Gamepad Circle";
+			if (useNintendoLabels) return "Gamepad A";
+			return "Gamepad B";
+		case GPAD_X:
+			if (usePlayStationLabels) return "Gamepad Square";
+			if (useNintendoLabels) return "Gamepad Y";
+			return "Gamepad X";
+		case GPAD_Y:
+			if (usePlayStationLabels) return "Gamepad Triangle";
+			if (useNintendoLabels) return "Gamepad X";
+			return "Gamepad Y";
+		case GPAD_LB:
+			if (usePlayStationLabels) return "Gamepad L1";
+			if (useNintendoLabels) return "Gamepad L";
+			return "Gamepad LB";
+		case GPAD_RB:
+			if (usePlayStationLabels) return "Gamepad R1";
+			if (useNintendoLabels) return "Gamepad R";
+			return "Gamepad RB";
+		case GPAD_BACK:
+			if (usePlayStationLabels) return "Gamepad Share";
+			if (useNintendoLabels) return "Gamepad -";
+			return "Gamepad Back";
+		case GPAD_START:
+			if (usePlayStationLabels) return "Gamepad Options";
+			if (useNintendoLabels) return "Gamepad +";
+			return "Gamepad Start";
+		case GPAD_LS:
+			if (usePlayStationLabels) return "Gamepad L3";
+			if (useNintendoLabels) return "Gamepad Left Stick";
+			return "Gamepad LS";
+		case GPAD_RS:
+			if (usePlayStationLabels) return "Gamepad R3";
+			if (useNintendoLabels) return "Gamepad Right Stick";
+			return "Gamepad RS";
 		case GPAD_DPAD_UP:    return "Gamepad D-Pad Up";
 		case GPAD_DPAD_DOWN:  return "Gamepad D-Pad Down";
 		case GPAD_DPAD_LEFT:  return "Gamepad D-Pad Left";
 		case GPAD_DPAD_RIGHT: return "Gamepad D-Pad Right";
-		case GPAD_LT:         return usePlayStationLabels ? "Gamepad L2" : "Gamepad LT";
-		case GPAD_RT:         return usePlayStationLabels ? "Gamepad R2" : "Gamepad RT";
+		case GPAD_LT:
+			if (usePlayStationLabels) return "Gamepad L2";
+			if (useNintendoLabels) return "Gamepad ZL";
+			return "Gamepad LT";
+		case GPAD_RT:
+			if (usePlayStationLabels) return "Gamepad R2";
+			if (useNintendoLabels) return "Gamepad ZR";
+			return "Gamepad RT";
 		default:
 			break;
 		}

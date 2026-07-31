@@ -16,7 +16,8 @@ namespace ShaderToggler
 		{
 			Auto = 0,
 			Xbox = 1,
-			PlayStation = 2
+			PlayStation = 2,
+			Nintendo = 3
 		};
 
 		enum class GlobalHotkeyModifier
@@ -32,12 +33,15 @@ namespace ShaderToggler
 		};
 
 		KeyData();
-
+//GT
 		void setKeyFromIniFile(uint32_t newKeyValue);
 		void setKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		uint32_t getKeyForIniFile() const;
 		void clear();
+		void prepareForBindingCollection();
 		void collectKeysPressed(const reshade::api::effect_runtime* runtime);
+
+		static void setMouseHotkeysBlocked(bool blocked);
 
 		bool isKeyDown(const reshade::api::effect_runtime* runtime) const
 		{
@@ -46,6 +50,9 @@ namespace ShaderToggler
 
 			if (isGamepadCode(_keyCode))
 				return isGamepadButtonDown(_keyCode);
+
+			if (isMouseCode(_keyCode) && s_mouseHotkeysBlocked)
+				return false;
 
 			const bool altPressed = runtime->is_key_down(VK_MENU);
 			const bool shiftPressed = runtime->is_key_down(VK_SHIFT);
@@ -75,6 +82,7 @@ namespace ShaderToggler
 		static void setControllerLabelMode(ControllerLabelMode mode);
 		static ControllerLabelMode getControllerLabelMode();
 		static bool isPlayStationControllerDetected();
+		static bool isNintendoControllerDetected();
 		static void refreshControllerTypeDetection();
 
 		static void setGlobalHotkeyModifier(GlobalHotkeyModifier modifier);
@@ -92,11 +100,14 @@ namespace ShaderToggler
 		void setKeyAsString();
 
 		static bool isGamepadCode(uint8_t code);
+		static bool isMouseCode(uint8_t code);
 		static bool isGamepadButtonDown(uint8_t code);
 		static bool isGamepadButtonPressed(uint8_t code);
 
 		static bool detectPlayStationController();
+		static bool detectNintendoController();
 		static bool shouldUsePlayStationLabels();
+		static bool shouldUseNintendoLabels();
 
 		static bool globalModifierRequiresCtrl();
 		static bool globalModifierRequiresAlt();
@@ -107,11 +118,14 @@ namespace ShaderToggler
 		bool _altRequired;
 		bool _ctrlRequired;
 		std::string _keyAsString;
+		bool _mouseBindingCollectionArmed;
 
 		static ControllerLabelMode s_controllerLabelMode;
 		static bool s_cachedPlayStationDetected;
+		static bool s_cachedNintendoDetected;
 		static DWORD s_lastControllerDetectTick;
 		static GlobalHotkeyModifier s_globalHotkeyModifier;
+		static bool s_mouseHotkeysBlocked;
 	};
 }
 //GT

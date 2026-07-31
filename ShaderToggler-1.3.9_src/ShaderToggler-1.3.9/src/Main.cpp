@@ -1427,13 +1427,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 {
 	applyModernUiStyle();
 
-	if (g_toggleGroupIdKeyBindingEditing >= 0 ||
-		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
-		g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
-	{
-		g_keyCollector.collectKeysPressed(runtime);
-	}
-
 	if (ImGui::CollapsingHeader("General info and help"))
 	{
 		ImGui::PushTextWrapPos();
@@ -2186,6 +2179,17 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		}
 
 		ImGui::EndChild();
+	}
+
+	// Collect bindings only after the complete interface has been processed.
+	// This prevents the left-click used on an OK or Cancel button from
+	// replacing the key that was just selected. A newly opened binding editor
+	// still ignores its opening click through KeyData's release-to-arm logic.
+	if (g_toggleGroupIdKeyBindingEditing >= 0 ||
+		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
+		g_toggleGroupIdTimedSuppressionKeyEditing >= 0)
+	{
+		g_keyCollector.collectKeysPressed(runtime);
 	}
 }
 

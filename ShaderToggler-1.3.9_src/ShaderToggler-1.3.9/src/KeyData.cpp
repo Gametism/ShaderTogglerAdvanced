@@ -30,7 +30,6 @@ namespace ShaderToggler
 			return STA_KEYDATA_UNIT_TAG_B;
 		}
 
-//GT
 		constexpr uint8_t GPAD_A          = 240;
 		constexpr uint8_t GPAD_B          = 241;
 		constexpr uint8_t GPAD_X          = 242;

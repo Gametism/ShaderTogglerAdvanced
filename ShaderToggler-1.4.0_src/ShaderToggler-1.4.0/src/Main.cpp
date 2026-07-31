@@ -1660,13 +1660,13 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				char keyBuf[128] = {};
 				strncpy_s(keyBuf, sizeof(keyBuf), textBoxContents.c_str(), _TRUNCATE);
 				ImGui::InputText("##Key shortcut", keyBuf, sizeof(keyBuf), ImGuiInputTextFlags_ReadOnly);
-				ImGui::SameLine();
-				showHelpMarker("Mouse only: Release, move away, then click.");
-
 				if (ImGui::IsItemClicked())
 				{
 					startKeyBindingEditing(group);
 				}
+
+				ImGui::SameLine();
+				showHelpMarker("Mouse only: Release, move away, then click.");
 				if (g_toggleGroupIdKeyBindingEditing == group.getId())
 				{
 					isKeyEditing = true;
@@ -2259,4 +2259,3 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 
 	return TRUE;
 }
-//GT

@@ -27,7 +27,6 @@ namespace ShaderToggler
 			PlayStation = 2,
 			Nintendo = 3
 		};
-
 //GT
 		static constexpr uint8_t GPAD_A          = 240;
 		static constexpr uint8_t GPAD_B          = 241;
@@ -72,17 +71,20 @@ namespace ShaderToggler
 
 		static void shutdown()
 		{
+#if defined(_WIN64)
+			// Native HID is enabled only in 64-bit builds. Do not perform
+			// blocking HID cancellation from 32-bit legacy wrappers.
 			closeDualSenseDevice();
 			closeNintendoDevice();
+#endif
 
-			if (s_xinputModule != nullptr)
-			{
-				FreeLibrary(s_xinputModule);
-				s_xinputModule = nullptr;
-			}
-
+			// Do not call FreeLibrary here. ReShade may unload the add-on from
+			// inside the Windows loader lock while dgVoodoo2 is rebuilding its
+			// temporary graphics device. The OS will release the dynamically
+			// loaded XInput module when the process exits.
 			s_xinputGetState = nullptr;
 			s_xinputInitialized = false;
+			s_xinputModule = nullptr;
 			s_lastPollTick = 0;
 			s_previousState = {};
 			s_currentState = {};
@@ -90,6 +92,9 @@ namespace ShaderToggler
 
 		static bool isPlayStationControllerDetected()
 		{
+#if !defined(_WIN64)
+			return false;
+#else
 			// Label detection must not open HID handles or start asynchronous
 			// reads. Some games and wrappers create and destroy an initial
 			// graphics device, causing ReShade to unload and reload add-ons.
@@ -110,11 +115,15 @@ namespace ShaderToggler
 			}
 
 			return false;
+#endif
 		}
 
 
 		static bool isNintendoControllerDetected()
 		{
+#if !defined(_WIN64)
+			return false;
+#else
 			// Keep label detection side-effect free for the same reason as the
 			// PlayStation path above. Native HID input is opened lazily only
 			// when a controller binding is actually queried.
@@ -134,9 +143,10 @@ namespace ShaderToggler
 			}
 
 			return false;
+#endif
 		}
 
-
+//GT
 	private:
 		static constexpr BYTE GPAD_TRIGGER_THRESHOLD = 30;
 		static constexpr USHORT SONY_VENDOR_ID = 0x054C;
@@ -288,6 +298,7 @@ namespace ShaderToggler
 			{
 				s_previousState = s_currentState;
 
+#if defined(_WIN64)
 				const ControllerState dualSenseState = getDualSenseControllerState();
 				if (dualSenseState.connected)
 				{
@@ -301,6 +312,14 @@ namespace ShaderToggler
 					else
 						s_currentState = getXInputControllerState();
 				}
+#else
+				// Legacy 32-bit games and wrappers such as dgVoodoo2 frequently
+				// create and destroy temporary graphics devices during startup.
+				// Keep the Win32 controller path identical to the previously
+				// stable ShaderToggler behavior: XInput only, with no HID
+				// enumeration, device handles or overlapped I/O.
+				s_currentState = getXInputControllerState();
+#endif
 
 				s_lastPollTick = nowTick;
 			}
@@ -431,7 +450,7 @@ namespace ShaderToggler
 					CloseHandle(deviceHandle);
 					continue;
 				}
-
+//GT
 				s_dualSenseHandle = deviceHandle;
 				s_dualSenseReadEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 				if (s_dualSenseReadEvent == nullptr)

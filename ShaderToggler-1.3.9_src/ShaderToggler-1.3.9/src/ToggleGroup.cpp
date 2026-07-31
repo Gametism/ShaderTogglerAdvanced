@@ -59,10 +59,7 @@ namespace ShaderToggler
 	void ToggleGroup::setIsActiveAtStartup(bool startup) { m_activeAtStartup = startup; }
 
 	bool ToggleGroup::isStartupTimed() const { return m_startupTimed; }
-	void ToggleGroup::setStartupTimed(bool timed)
-	{
-		m_startupTimed = timed;
-	}
+	void ToggleGroup::setStartupTimed(bool timed) { m_startupTimed = timed; }
 
 	int ToggleGroup::getStartupDurationMs() const { return m_startupDurationMs; }
 	void ToggleGroup::setStartupDurationMs(int durationMs)
@@ -71,7 +68,6 @@ namespace ShaderToggler
 			durationMs = 100;
 		if (durationMs > 3600000)
 			durationMs = 3600000;
-
 		m_startupDurationMs = durationMs;
 	}
 

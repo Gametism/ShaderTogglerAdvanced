@@ -24,7 +24,6 @@
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include "KeyData.h"
-#include "ControllerManager.h"
 #include <vector>
 #include <filesystem>
 #include <Windows.h>
@@ -132,6 +131,7 @@ static const char* GT_FOOTER =
 	"; ==========================================\n";
 
 static bool g_uiStyleInitialized = false;
+static std::chrono::steady_clock::time_point g_overlayMouseCaptureLastSeen;
 
 static bool is_key_down_numpad_only(reshade::api::effect_runtime* runtime, int vk_numpad)
 {
@@ -558,7 +558,7 @@ void loadShaderTogglerIniFile()
 
 	const int savedControllerMode = iniFile.GetInt("ControllerLabelMode", "General");
 	if (savedControllerMode >= static_cast<int>(KeyData::ControllerLabelMode::Auto) &&
-		savedControllerMode <= static_cast<int>(KeyData::ControllerLabelMode::Nintendo))
+		savedControllerMode <= static_cast<int>(KeyData::ControllerLabelMode::PlayStation))
 	{
 		KeyData::setControllerLabelMode(static_cast<KeyData::ControllerLabelMode>(savedControllerMode));
 	}
@@ -726,6 +726,9 @@ static void displayShaderManagerStats(ShaderManager& toDisplay, const char* shad
 static void onReshadeOverlay(reshade::api::effect_runtime *runtime)
 {
 	(void)runtime;
+
+	if (ImGui::GetIO().WantCaptureMouse)
+		g_overlayMouseCaptureLastSeen = std::chrono::steady_clock::now();
 
 	if (g_toggleGroupIdShaderEditing >= 0 && g_overlayOpacity > 0.0f)
 	{
@@ -899,7 +902,11 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
-	const bool mouseCapturedByOverlay = ImGui::GetIO().WantCaptureMouse;
+	const auto mouseCaptureNow = std::chrono::steady_clock::now();
+	const bool mouseCapturedByOverlay =
+		g_overlayMouseCaptureLastSeen.time_since_epoch().count() != 0 &&
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			mouseCaptureNow - g_overlayMouseCaptureLastSeen).count() <= 100;
 	KeyData::setMouseHotkeysBlocked(mouseCapturedByOverlay);
 
 	if (g_activeCollectorFrameCounter > 0)
@@ -1459,7 +1466,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		showHelpMarker("Increase this if the shader you want only appears occasionally.");
 
 		int controllerMode = static_cast<int>(KeyData::getControllerLabelMode());
-		const char* controllerModeItems[] = { "Auto", "Xbox", "PlayStation", "Nintendo" };
+		const char* controllerModeItems[] = { "Auto", "Xbox", "PlayStation" };
 		if (ImGui::Combo("Controller labels", &controllerMode, controllerModeItems, IM_ARRAYSIZE(controllerModeItems)))
 		{
 			KeyData::setControllerLabelMode(static_cast<KeyData::ControllerLabelMode>(controllerMode));
@@ -1471,13 +1478,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		if (KeyData::getControllerLabelMode() == KeyData::ControllerLabelMode::Auto)
 		{
 			KeyData::refreshControllerTypeDetection();
-			if (KeyData::isNintendoControllerDetected())
-			{
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-				ImGui::TextUnformatted("Detected controller labels: Nintendo");
-				ImGui::PopStyleColor();
-			}
-			else if (KeyData::isPlayStationControllerDetected())
+			if (KeyData::isPlayStationControllerDetected())
 			{
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 				ImGui::TextUnformatted("Detected controller labels: PlayStation");
@@ -1491,10 +1492,6 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		else if (KeyData::getControllerLabelMode() == KeyData::ControllerLabelMode::PlayStation)
 		{
 			ImGui::TextUnformatted("Controller labels are forced to PlayStation");
-		}
-		else if (KeyData::getControllerLabelMode() == KeyData::ControllerLabelMode::Nintendo)
-		{
-			ImGui::TextUnformatted("Controller labels are forced to Nintendo");
 		}
 		else
 		{
@@ -1931,9 +1928,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				bool isDefaultActive = group.isActiveAtStartup();
 				if (ImGui::Checkbox("Is active at startup", &isDefaultActive))
-				{
 					group.setIsActiveAtStartup(isDefaultActive);
-				}
 				ImGui::SameLine();
 				showHelpMarker("Activates this group automatically when the game starts.");
 				ImGui::PopItemWidth();
@@ -1945,9 +1940,7 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 					ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 					bool startupTimed = group.isStartupTimed();
 					if (ImGui::Checkbox("Deactivate automatically", &startupTimed))
-					{
 						group.setStartupTimed(startupTimed);
-					}
 					ImGui::SameLine();
 					showHelpMarker("When enabled, the startup activation ends automatically after the configured duration.");
 					ImGui::PopItemWidth();
@@ -2212,9 +2205,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		const std::filesystem::path basePath = dllPath.parent_path();
 		g_iniFileName = (basePath / HASH_FILE_NAME).string();
 
-		// Controller detection is intentionally deferred. Native HID handles
-		// must not be opened from DllMain, especially in games/wrappers that
-		// unload and reload the add-on during graphics-device initialization.
+		KeyData::refreshControllerTypeDetection();
+
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -2233,7 +2225,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 	break;
 
 	case DLL_PROCESS_DETACH:
-		ControllerManager::shutdown();
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);

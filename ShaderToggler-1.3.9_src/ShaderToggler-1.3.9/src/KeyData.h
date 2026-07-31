@@ -16,8 +16,7 @@ namespace ShaderToggler
 		{
 			Auto = 0,
 			Xbox = 1,
-			PlayStation = 2,
-			Nintendo = 3
+			PlayStation = 2
 		};
 
 		enum class GlobalHotkeyModifier
@@ -82,7 +81,6 @@ namespace ShaderToggler
 		static void setControllerLabelMode(ControllerLabelMode mode);
 		static ControllerLabelMode getControllerLabelMode();
 		static bool isPlayStationControllerDetected();
-		static bool isNintendoControllerDetected();
 		static void refreshControllerTypeDetection();
 
 		static void setGlobalHotkeyModifier(GlobalHotkeyModifier modifier);
@@ -105,9 +103,7 @@ namespace ShaderToggler
 		static bool isGamepadButtonPressed(uint8_t code);
 
 		static bool detectPlayStationController();
-		static bool detectNintendoController();
 		static bool shouldUsePlayStationLabels();
-		static bool shouldUseNintendoLabels();
 
 		static bool globalModifierRequiresCtrl();
 		static bool globalModifierRequiresAlt();
@@ -122,7 +118,6 @@ namespace ShaderToggler
 
 		static ControllerLabelMode s_controllerLabelMode;
 		static bool s_cachedPlayStationDetected;
-		static bool s_cachedNintendoDetected;
 		static DWORD s_lastControllerDetectTick;
 		static GlobalHotkeyModifier s_globalHotkeyModifier;
 		static bool s_mouseHotkeysBlocked;

@@ -28,7 +28,7 @@ namespace ShaderToggler
 			Nintendo = 3
 		};
 
-		// Existing values are intentionally preserved for full INI compatibility.
+//GT
 		static constexpr uint8_t GPAD_A          = 240;
 		static constexpr uint8_t GPAD_B          = 241;
 		static constexpr uint8_t GPAD_X          = 242;
@@ -70,18 +70,30 @@ namespace ShaderToggler
 			return currentState.type;
 		}
 
+		static void shutdown()
+		{
+			closeDualSenseDevice();
+			closeNintendoDevice();
+
+			if (s_xinputModule != nullptr)
+			{
+				FreeLibrary(s_xinputModule);
+				s_xinputModule = nullptr;
+			}
+
+			s_xinputGetState = nullptr;
+			s_xinputInitialized = false;
+			s_lastPollTick = 0;
+			s_previousState = {};
+			s_currentState = {};
+		}
+
 		static bool isPlayStationControllerDetected()
 		{
-			refreshDualSenseDevice(false);
-			if (s_dualSenseHandle != INVALID_HANDLE_VALUE)
-				return true;
-
-			// Preserve detection of PlayStation controllers translated through
-			// Steam Input, DS4Windows or another XInput wrapper.
-			XINPUT_STATE state = {};
-			if (!tryGetXInputState(0, state))
-				return false;
-
+			// Label detection must not open HID handles or start asynchronous
+			// reads. Some games and wrappers create and destroy an initial
+			// graphics device, causing ReShade to unload and reload add-ons.
+			// Keeping detection enumeration-only makes that transition safe.
 			ULONG charCount = 0;
 			if (CM_Get_Device_ID_List_SizeW(&charCount, nullptr, CM_GETIDLIST_FILTER_PRESENT) != CR_SUCCESS || charCount == 0)
 				return false;
@@ -103,10 +115,9 @@ namespace ShaderToggler
 
 		static bool isNintendoControllerDetected()
 		{
-			refreshNintendoDevice(false);
-			if (s_nintendoHandle != INVALID_HANDLE_VALUE)
-				return true;
-
+			// Keep label detection side-effect free for the same reason as the
+			// PlayStation path above. Native HID input is opened lazily only
+			// when a controller binding is actually queried.
 			ULONG charCount = 0;
 			if (CM_Get_Device_ID_List_SizeW(&charCount, nullptr, CM_GETIDLIST_FILTER_PRESENT) != CR_SUCCESS || charCount == 0)
 				return false;
@@ -124,6 +135,7 @@ namespace ShaderToggler
 
 			return false;
 		}
+
 
 	private:
 		static constexpr BYTE GPAD_TRIGGER_THRESHOLD = 30;
@@ -958,3 +970,4 @@ namespace ShaderToggler
 		}
 	};
 }
+//GT

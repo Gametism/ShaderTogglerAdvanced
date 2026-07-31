@@ -24,6 +24,7 @@
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include "KeyData.h"
+#include "ControllerManager.h"
 #include <vector>
 #include <filesystem>
 #include <Windows.h>
@@ -2211,8 +2212,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		const std::filesystem::path basePath = dllPath.parent_path();
 		g_iniFileName = (basePath / HASH_FILE_NAME).string();
 
-		KeyData::refreshControllerTypeDetection();
-
+		// Controller detection is intentionally deferred. Native HID handles
+		// must not be opened from DllMain, especially in games/wrappers that
+		// unload and reload the add-on during graphics-device initialization.
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -2231,6 +2233,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 	break;
 
 	case DLL_PROCESS_DETACH:
+		ControllerManager::shutdown();
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
@@ -2249,4 +2252,3 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 
 	return TRUE;
 }
-//GT

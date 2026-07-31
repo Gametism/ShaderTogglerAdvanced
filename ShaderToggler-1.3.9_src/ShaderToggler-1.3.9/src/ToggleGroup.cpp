@@ -20,7 +20,7 @@ namespace ShaderToggler
 	}
 
 	static ToggleGroup::GroupId s_nextGroupId = 1;
-//GT
+
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
 		: m_id(id)
 		, m_name(name)

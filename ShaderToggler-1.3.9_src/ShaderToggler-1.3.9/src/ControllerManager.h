@@ -14,7 +14,7 @@
 #pragma comment(lib, "Cfgmgr32.lib")
 #pragma comment(lib, "Hid.lib")
 #pragma comment(lib, "Setupapi.lib")
-//GT
+
 namespace ShaderToggler
 {
 	class ControllerManager
@@ -28,7 +28,7 @@ namespace ShaderToggler
 			Nintendo = 3
 		};
 
-//GT
+		// Existing values are intentionally preserved for full INI compatibility.
 		static constexpr uint8_t GPAD_A          = 240;
 		static constexpr uint8_t GPAD_B          = 241;
 		static constexpr uint8_t GPAD_X          = 242;
@@ -439,7 +439,7 @@ namespace ShaderToggler
 
 			SetupDiDestroyDeviceInfoList(deviceInfoSet);
 		}
-//GT
+
 		static void closeDualSenseDevice()
 		{
 			if (s_dualSenseHandle != INVALID_HANDLE_VALUE)
@@ -596,7 +596,7 @@ namespace ShaderToggler
 			s_dualSenseState = state;
 		}
 
-//GT
+
 		static bool isNintendoProduct(USHORT productId)
 		{
 			return productId == SWITCH_PRO_PRODUCT_ID ||
@@ -958,4 +958,3 @@ namespace ShaderToggler
 		}
 	};
 }
-//GT

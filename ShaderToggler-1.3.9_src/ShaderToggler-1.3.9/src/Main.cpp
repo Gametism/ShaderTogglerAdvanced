@@ -530,7 +530,7 @@ static void applyModernUiStyle()
 
 	g_uiStyleInitialized = true;
 }
-//GT
+
 void addDefaultGroup()
 {
 	ToggleGroup toAdd("Default", ToggleGroup::getNewGroupId());
@@ -898,9 +898,7 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
-	const bool mouseCapturedByOverlay =
-		ImGui::GetCurrentContext() != nullptr &&
-		ImGui::GetIO().WantCaptureMouse;
+	const bool mouseCapturedByOverlay = ImGui::GetIO().WantCaptureMouse;
 	KeyData::setMouseHotkeysBlocked(mouseCapturedByOverlay);
 
 	if (g_activeCollectorFrameCounter > 0)

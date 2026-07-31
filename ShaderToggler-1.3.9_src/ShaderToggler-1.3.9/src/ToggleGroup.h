@@ -6,7 +6,7 @@
 #include <reshade.hpp>
 #include "ShaderManager.h"
 #include "KeyData.h"
-//GT
+
 namespace ShaderToggler
 {
 	//

@@ -33,7 +33,7 @@ namespace ShaderToggler
 		};
 
 		KeyData();
-//GT
+
 		void setKeyFromIniFile(uint32_t newKeyValue);
 		void setKey(uint8_t newKeyValue, bool shiftRequired = false, bool altRequired = false, bool ctrlRequired = false);
 		uint32_t getKeyForIniFile() const;

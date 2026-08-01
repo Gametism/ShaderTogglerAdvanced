@@ -44,6 +44,9 @@ namespace ShaderToggler
 		const std::string& getName() const;
 		void setName(const std::string& name);
 
+		const std::string& getNotice() const;
+		void setNotice(const std::string& notice);
+
 		bool isActive() const;
 		void setActive(bool active);
 
@@ -140,6 +143,7 @@ namespace ShaderToggler
 	private:
 		GroupId m_id;
 		std::string m_name;
+		std::string m_notice;
 		bool m_active;
 		bool m_activeAtStartup;
 		bool m_startupTimed;

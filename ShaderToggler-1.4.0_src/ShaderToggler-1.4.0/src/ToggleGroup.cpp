@@ -24,6 +24,7 @@ namespace ShaderToggler
 	ToggleGroup::ToggleGroup(const std::string& name, GroupId id)
 		: m_id(id)
 		, m_name(name)
+		, m_notice("")
 		, m_active(false)
 		, m_activeAtStartup(false)
 		, m_startupTimed(false)
@@ -51,6 +52,9 @@ namespace ShaderToggler
 
 	const std::string& ToggleGroup::getName() const { return m_name; }
 	void ToggleGroup::setName(const std::string& name) { m_name = name; }
+
+	const std::string& ToggleGroup::getNotice() const { return m_notice; }
+	void ToggleGroup::setNotice(const std::string& notice) { m_notice = notice; }
 
 	bool ToggleGroup::isActive() const { return m_active; }
 	void ToggleGroup::setActive(bool active) { m_active = active; }
@@ -395,6 +399,7 @@ namespace ShaderToggler
 	void ToggleGroup::loadState(CDataFile& iniFile, int index, bool usingCustomFormat)
 	{
 		clearHashes();
+		m_notice.clear();
 		m_startupTimed = false;
 		m_startupDurationMs = 30000;
 		m_holdMode = false;
@@ -435,6 +440,7 @@ namespace ShaderToggler
 			}
 
 			m_name = "Default";
+			m_notice.clear();
 			m_activeAtStartup = false;
 			m_startupTimed = false;
 			m_startupDurationMs = 30000;
@@ -485,6 +491,8 @@ namespace ShaderToggler
 		m_name = iniFile.GetValue("Name", sectionRoot);
 		if (m_name.empty())
 			m_name = "Default";
+
+		m_notice = iniFile.GetValue("Notice", sectionRoot);
 
 		const uint32_t toggleKeyValue = iniFile.GetUInt("ToggleKey", sectionRoot);
 		if (toggleKeyValue == UINT_MAX)
@@ -639,6 +647,7 @@ namespace ShaderToggler
 		iniFile.SetUInt("AmountHashes", counter, "", computeHashesCategory);
 
 		iniFile.SetValue("Name", m_name, "", sectionRoot);
+		iniFile.SetValue("Notice", m_notice, "", sectionRoot);
 		iniFile.SetUInt("ToggleKey", static_cast<uint32_t>(m_toggleKey.toInt()), "", sectionRoot);
 
 		if (!m_timedTriggerKeys.empty())

@@ -30,7 +30,7 @@ namespace ShaderToggler
 			return STA_KEYDATA_UNIT_TAG_B;
 		}
 
-		// Custom codes stored in the normal 8-bit key slot
+//GT
 		constexpr uint8_t GPAD_A          = 240;
 		constexpr uint8_t GPAD_B          = 241;
 		constexpr uint8_t GPAD_X          = 242;

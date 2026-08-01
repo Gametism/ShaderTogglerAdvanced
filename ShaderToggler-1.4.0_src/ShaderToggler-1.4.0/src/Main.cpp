@@ -498,6 +498,7 @@ static std::string buildIniSignature()
 	for (const auto& group : g_toggleGroups)
 	{
 		data += "|Name=" + group.getName();
+		data += "|Notice=" + group.getNotice();
 		data += "|Key=" + std::to_string(group.getToggleKey().toInt());
 		data += "|Startup=" + std::to_string(group.isActiveAtStartup() ? 1 : 0);
 		data += "|StartupTimed=" + std::to_string(group.isStartupTimed() ? 1 : 0);
@@ -2029,6 +2030,20 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			ImGui::SameLine();
 			ImGui::Text(" %s (%s)", group.getName().c_str(), group.getToggleKeyAsString().c_str());
 
+			if (!group.getNotice().empty())
+			{
+				ImGui::SameLine();
+				ImGui::TextUnformatted("[!]");
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+					ImGui::TextUnformatted(group.getNotice().c_str());
+					ImGui::PopTextWrapPos();
+					ImGui::EndTooltip();
+				}
+			}
+
 			if (group.isTimedMode())
 			{
 				ImGui::SameLine();
@@ -2100,6 +2115,21 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
 				ImGui::InputText("##Name", tmpBuffer, 149);
 				group.setName(tmpBuffer);
+				ImGui::PopItemWidth();
+
+				char noticeBuffer[512] = {};
+				strncpy_s(noticeBuffer, sizeof(noticeBuffer), group.getNotice().c_str(), _TRUNCATE);
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.7f);
+				ImGui::Text("Notice");
+				ImGui::SameLine(ImGui::GetWindowWidth() * 0.25f);
+				ImGui::InputTextMultiline(
+					"##Notice",
+					noticeBuffer,
+					sizeof(noticeBuffer),
+					ImVec2(0.0f, ImGui::GetTextLineHeight() * 3.0f));
+				group.setNotice(noticeBuffer);
+				ImGui::SameLine();
+				showHelpMarker("Shown when hovering [!] next to the group name.");
 				ImGui::PopItemWidth();
 
 				bool isKeyEditing = false;
@@ -2715,3 +2745,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 
 	return TRUE;
 }
+//GT

@@ -74,8 +74,10 @@ static std::atomic_int g_toggleGroupTimedTriggerKeySlotEditing = -1;
 static std::atomic_int g_toggleGroupIdTimedSuppressionKeyEditing = -1;
 static std::atomic_int g_toggleGroupTimedSuppressionKeySlotEditing = -1;
 static std::atomic_int g_toggleGroupIdShaderEditing = -1;
-static std::atomic_int g_globalSuspensionHotkeySlotEditing = -1;
-static std::vector<KeyData> g_globalSuspensionHotkeys;
+static std::atomic_int g_globalSuspendHotkeySlotEditing = -1;
+static std::atomic_int g_globalRestoreHotkeySlotEditing = -1;
+static std::vector<KeyData> g_globalSuspendHotkeys;
+static std::vector<KeyData> g_globalRestoreHotkeys;
 static bool g_allToggleGroupsSuspended = false;
 static std::chrono::steady_clock::time_point g_globalSuspensionStarted;
 static std::unordered_set<int> g_pendingSuspendedGroupToggles;
@@ -369,17 +371,20 @@ static void shiftTimePointMap(TMap& values, const std::chrono::steady_clock::dur
 		entry.second += amount;
 }
 
-static bool globalSuspensionHotkeyExists(const KeyData& key, int ignoredIndex = -1)
+static bool globalHotkeyExists(
+	const std::vector<KeyData>& hotkeys,
+	const KeyData& key,
+	int ignoredIndex = -1)
 {
 	if (!key.isValid())
 		return false;
 
-	for (size_t i = 0; i < g_globalSuspensionHotkeys.size(); ++i)
+	for (size_t i = 0; i < hotkeys.size(); ++i)
 	{
 		if (static_cast<int>(i) == ignoredIndex)
 			continue;
 
-		if (g_globalSuspensionHotkeys[i].toInt() == key.toInt())
+		if (hotkeys[i].toInt() == key.toInt())
 			return true;
 	}
 
@@ -436,9 +441,11 @@ static void toggleAllToggleGroupsSuspension()
 		suspendAllToggleGroups();
 }
 
-static bool isAnyGlobalSuspensionHotkeyPressed(reshade::api::effect_runtime* runtime)
+static bool isAnyGlobalHotkeyPressed(
+	const std::vector<KeyData>& hotkeys,
+	reshade::api::effect_runtime* runtime)
 {
-	for (const auto& key : g_globalSuspensionHotkeys)
+	for (const auto& key : hotkeys)
 	{
 		if (key.isKeyPressed(runtime))
 			return true;
@@ -460,12 +467,20 @@ static std::string buildIniSignature()
 	data += std::to_string(static_cast<int>(KeyData::getControllerLabelMode()));
 	data += "|GlobalHotkeyModifier=";
 	data += std::to_string(KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()));
-	data += "|GlobalSuspensionHotkeyCount=";
-	data += std::to_string(g_globalSuspensionHotkeys.size());
-	for (size_t i = 0; i < g_globalSuspensionHotkeys.size(); ++i)
+	data += "|GlobalSuspendHotkeyCount=";
+	data += std::to_string(g_globalSuspendHotkeys.size());
+	for (size_t i = 0; i < g_globalSuspendHotkeys.size(); ++i)
 	{
-		data += "|GlobalSuspensionHotkey" + std::to_string(i) + "=";
-		data += std::to_string(g_globalSuspensionHotkeys[i].toInt());
+		data += "|GlobalSuspendHotkey" + std::to_string(i) + "=";
+		data += std::to_string(g_globalSuspendHotkeys[i].toInt());
+	}
+
+	data += "|GlobalRestoreHotkeyCount=";
+	data += std::to_string(g_globalRestoreHotkeys.size());
+	for (size_t i = 0; i < g_globalRestoreHotkeys.size(); ++i)
+	{
+		data += "|GlobalRestoreHotkey" + std::to_string(i) + "=";
+		data += std::to_string(g_globalRestoreHotkeys[i].toInt());
 	}
 
 	//
@@ -676,14 +691,43 @@ void loadShaderTogglerIniFile()
 		KeyData::setGlobalHotkeyModifier(KeyData::GlobalHotkeyModifier::None);
 	}
 
-	g_globalSuspensionHotkeys.clear();
-	const std::vector<uint32_t> savedGlobalSuspensionHotkeys =
-		iniFile.GetArray("GlobalSuspensionHotkeys", "General");
-	for (const uint32_t keyValue : savedGlobalSuspensionHotkeys)
+	g_globalSuspendHotkeys.clear();
+	g_globalRestoreHotkeys.clear();
+
+	const std::vector<uint32_t> savedGlobalSuspendHotkeys =
+		iniFile.GetArray("GlobalSuspendHotkeys", "General");
+	for (const uint32_t keyValue : savedGlobalSuspendHotkeys)
 	{
 		KeyData key = KeyData::fromInt(keyValue);
-		if (key.isValid() && !globalSuspensionHotkeyExists(key))
-			g_globalSuspensionHotkeys.push_back(key);
+		if (key.isValid() && !globalHotkeyExists(g_globalSuspendHotkeys, key))
+			g_globalSuspendHotkeys.push_back(key);
+	}
+
+	const std::vector<uint32_t> savedGlobalRestoreHotkeys =
+		iniFile.GetArray("GlobalRestoreHotkeys", "General");
+	for (const uint32_t keyValue : savedGlobalRestoreHotkeys)
+	{
+		KeyData key = KeyData::fromInt(keyValue);
+		if (key.isValid() && !globalHotkeyExists(g_globalRestoreHotkeys, key))
+			g_globalRestoreHotkeys.push_back(key);
+	}
+
+	// Migrate the earlier one-list format: the same keys suspend and restore.
+	if (g_globalSuspendHotkeys.empty() && g_globalRestoreHotkeys.empty())
+	{
+		const std::vector<uint32_t> legacyGlobalSuspensionHotkeys =
+			iniFile.GetArray("GlobalSuspensionHotkeys", "General");
+		for (const uint32_t keyValue : legacyGlobalSuspensionHotkeys)
+		{
+			KeyData key = KeyData::fromInt(keyValue);
+			if (!key.isValid())
+				continue;
+
+			if (!globalHotkeyExists(g_globalSuspendHotkeys, key))
+				g_globalSuspendHotkeys.push_back(key);
+			if (!globalHotkeyExists(g_globalRestoreHotkeys, key))
+				g_globalRestoreHotkeys.push_back(key);
+		}
 	}
 
 	g_allToggleGroupsSuspended = false;
@@ -750,11 +794,17 @@ void saveShaderTogglerIniFile()
 	iniFile.SetInt("ControllerLabelMode", static_cast<int>(KeyData::getControllerLabelMode()), "", "General");
 	iniFile.SetInt("GlobalHotkeyModifier", KeyData::globalHotkeyModifierToInt(KeyData::getGlobalHotkeyModifier()), "", "General");
 
-	std::vector<uint32_t> globalSuspensionHotkeyValues;
-	globalSuspensionHotkeyValues.reserve(g_globalSuspensionHotkeys.size());
-	for (const auto& key : g_globalSuspensionHotkeys)
-		globalSuspensionHotkeyValues.push_back(static_cast<uint32_t>(key.toInt()));
-	iniFile.SetArray("GlobalSuspensionHotkeys", globalSuspensionHotkeyValues, "", "General");
+	std::vector<uint32_t> globalSuspendHotkeyValues;
+	globalSuspendHotkeyValues.reserve(g_globalSuspendHotkeys.size());
+	for (const auto& key : g_globalSuspendHotkeys)
+		globalSuspendHotkeyValues.push_back(static_cast<uint32_t>(key.toInt()));
+	iniFile.SetArray("GlobalSuspendHotkeys", globalSuspendHotkeyValues, "", "General");
+
+	std::vector<uint32_t> globalRestoreHotkeyValues;
+	globalRestoreHotkeyValues.reserve(g_globalRestoreHotkeys.size());
+	for (const auto& key : g_globalRestoreHotkeys)
+		globalRestoreHotkeyValues.push_back(static_cast<uint32_t>(key.toInt()));
+	iniFile.SetArray("GlobalRestoreHotkeys", globalRestoreHotkeyValues, "", "General");
 
 	for (int i = 0; i < static_cast<int>(g_toggleGroups.size()); i++)
 	{
@@ -1033,9 +1083,23 @@ static void onReshadePresent(effect_runtime* runtime)
 		--g_activeCollectorFrameCounter;
 	}
 
-	const bool suspensionToggledThisFrame = isAnyGlobalSuspensionHotkeyPressed(runtime);
-	if (suspensionToggledThisFrame)
-		toggleAllToggleGroupsSuspension();
+	bool suspensionToggledThisFrame = false;
+	if (g_allToggleGroupsSuspended)
+	{
+		if (isAnyGlobalHotkeyPressed(g_globalRestoreHotkeys, runtime))
+		{
+			restoreAllToggleGroups();
+			suspensionToggledThisFrame = true;
+		}
+	}
+	else
+	{
+		if (isAnyGlobalHotkeyPressed(g_globalSuspendHotkeys, runtime))
+		{
+			suspendAllToggleGroups();
+			suspensionToggledThisFrame = true;
+		}
+	}
 
 	if (g_allToggleGroupsSuspended)
 	{
@@ -1398,38 +1462,49 @@ static void cancelAllKeyBindingEditors()
 	g_toggleGroupTimedTriggerKeySlotEditing = -1;
 	g_toggleGroupIdTimedSuppressionKeyEditing = -1;
 	g_toggleGroupTimedSuppressionKeySlotEditing = -1;
-	g_globalSuspensionHotkeySlotEditing = -1;
+	g_globalSuspendHotkeySlotEditing = -1;
+	g_globalRestoreHotkeySlotEditing = -1;
 	g_keyCollector.clear();
 }
 
-static void endGlobalSuspensionHotkeyEditing(bool acceptCollectedBinding)
+static void endGlobalHotkeyEditing(
+	bool editingSuspendList,
+	bool acceptCollectedBinding)
 {
-	const int slotIndex = g_globalSuspensionHotkeySlotEditing;
+	std::vector<KeyData>& hotkeys =
+		editingSuspendList ? g_globalSuspendHotkeys : g_globalRestoreHotkeys;
+	std::atomic_int& editingSlot =
+		editingSuspendList ? g_globalSuspendHotkeySlotEditing : g_globalRestoreHotkeySlotEditing;
+
+	const int slotIndex = editingSlot;
 
 	if (acceptCollectedBinding && slotIndex >= 0 && g_keyCollector.isValid())
 	{
-		if (!globalSuspensionHotkeyExists(g_keyCollector, slotIndex))
+		if (!globalHotkeyExists(hotkeys, g_keyCollector, slotIndex))
 		{
-			if (slotIndex < static_cast<int>(g_globalSuspensionHotkeys.size()))
-				g_globalSuspensionHotkeys[static_cast<size_t>(slotIndex)] = g_keyCollector;
-			else if (slotIndex == static_cast<int>(g_globalSuspensionHotkeys.size()))
-				g_globalSuspensionHotkeys.push_back(g_keyCollector);
+			if (slotIndex < static_cast<int>(hotkeys.size()))
+				hotkeys[static_cast<size_t>(slotIndex)] = g_keyCollector;
+			else if (slotIndex == static_cast<int>(hotkeys.size()))
+				hotkeys.push_back(g_keyCollector);
 
 			saveShaderTogglerIniFile();
 		}
 	}
 
-	g_globalSuspensionHotkeySlotEditing = -1;
+	editingSlot = -1;
 	g_keyCollector.clear();
 }
 
-static void startGlobalSuspensionHotkeyEditing(int slotIndex)
+static void startGlobalHotkeyEditing(bool editingSuspendList, int slotIndex)
 {
-	if (g_globalSuspensionHotkeySlotEditing == slotIndex)
+	std::atomic_int& editingSlot =
+		editingSuspendList ? g_globalSuspendHotkeySlotEditing : g_globalRestoreHotkeySlotEditing;
+
+	if (editingSlot == slotIndex)
 		return;
 
 	cancelAllKeyBindingEditors();
-	g_globalSuspensionHotkeySlotEditing = slotIndex;
+	editingSlot = slotIndex;
 	g_keyCollector.prepareForBindingCollection();
 }
 
@@ -1445,9 +1520,11 @@ void endKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& groupEditing
 
 void startKeyBindingEditing(ToggleGroup& groupEditing)
 {
-	if (g_globalSuspensionHotkeySlotEditing >= 0)
+	if (g_globalSuspendHotkeySlotEditing >= 0 ||
+		g_globalRestoreHotkeySlotEditing >= 0)
 	{
-		g_globalSuspensionHotkeySlotEditing = -1;
+		g_globalSuspendHotkeySlotEditing = -1;
+		g_globalRestoreHotkeySlotEditing = -1;
 		g_keyCollector.clear();
 	}
 	if (g_toggleGroupIdKeyBindingEditing == groupEditing.getId())
@@ -1499,9 +1576,11 @@ void endTimedTriggerKeyBindingEditing(bool acceptCollectedBinding, ToggleGroup& 
 
 void startTimedTriggerKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex)
 {
-	if (g_globalSuspensionHotkeySlotEditing >= 0)
+	if (g_globalSuspendHotkeySlotEditing >= 0 ||
+		g_globalRestoreHotkeySlotEditing >= 0)
 	{
-		g_globalSuspensionHotkeySlotEditing = -1;
+		g_globalSuspendHotkeySlotEditing = -1;
+		g_globalRestoreHotkeySlotEditing = -1;
 		g_keyCollector.clear();
 	}
 	if (g_toggleGroupIdTimedTriggerKeyEditing == groupEditing.getId() &&
@@ -1548,9 +1627,11 @@ void endTimedSuppressionKeyBindingEditing(bool acceptCollectedBinding, ToggleGro
 
 void startTimedSuppressionKeyBindingEditing(ToggleGroup& groupEditing, int slotIndex)
 {
-	if (g_globalSuspensionHotkeySlotEditing >= 0)
+	if (g_globalSuspendHotkeySlotEditing >= 0 ||
+		g_globalRestoreHotkeySlotEditing >= 0)
 	{
-		g_globalSuspensionHotkeySlotEditing = -1;
+		g_globalSuspendHotkeySlotEditing = -1;
+		g_globalRestoreHotkeySlotEditing = -1;
 		g_keyCollector.clear();
 	}
 	if (g_toggleGroupIdTimedSuppressionKeyEditing == groupEditing.getId() &&
@@ -1724,6 +1805,21 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 	if (ImGui::CollapsingHeader("Suspend All Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
 	{
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.78f, 0.25f, 1.00f));
+		ImGui::TextWrapped("Configure while the menu is closed and gameplay is visible.");
+		ImGui::PopStyleColor();
+
+		if (ImGui::Button("Set Current State as Gameplay"))
+		{
+			if (g_allToggleGroupsSuspended)
+				restoreAllToggleGroups();
+
+			g_pendingSuspendedGroupToggles.clear();
+			g_globalSuspensionStarted = {};
+		}
+		ImGui::SameLine();
+		showHelpMarker("Restores normal operation and clears any queued toggles. Use this while gameplay is visible.");
+
 		ImGui::TextUnformatted("Status:");
 		ImGui::SameLine();
 		if (g_allToggleGroupsSuspended)
@@ -1734,11 +1830,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		}
 		else
 		{
-			ImGui::TextUnformatted("Active");
+			ImGui::TextUnformatted("Gameplay");
 		}
-
-		ImGui::SameLine();
-		showHelpMarker("Temporarily disables all groups and restores their previous states when pressed again.");
 
 		if (g_allToggleGroupsSuspended)
 		{
@@ -1754,90 +1847,118 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 			}
 		}
 
-		ImGui::Separator();
-		ImGui::TextUnformatted("Hotkeys");
-
-		for (size_t hotkeyIndex = 0; hotkeyIndex < g_globalSuspensionHotkeys.size(); ++hotkeyIndex)
-		{
-			ImGui::PushID(static_cast<int>(hotkeyIndex));
-
-			const bool editingThisHotkey =
-				g_globalSuspensionHotkeySlotEditing == static_cast<int>(hotkeyIndex);
-
-			const std::string hotkeyText =
-				editingThisHotkey ? g_keyCollector.getKeyAsString() :
-				g_globalSuspensionHotkeys[hotkeyIndex].getKeyAsString();
-
-			char hotkeyBuffer[128] = {};
-			strncpy_s(hotkeyBuffer, sizeof(hotkeyBuffer), hotkeyText.c_str(), _TRUNCATE);
-			ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.45f);
-			ImGui::InputText("##GlobalSuspensionHotkey", hotkeyBuffer, sizeof(hotkeyBuffer), ImGuiInputTextFlags_ReadOnly);
-			if (ImGui::IsItemClicked())
-				startGlobalSuspensionHotkeyEditing(static_cast<int>(hotkeyIndex));
-			ImGui::PopItemWidth();
-
-			if (editingThisHotkey)
+		auto drawGlobalHotkeyList =
+			[&](const char* label,
+				std::vector<KeyData>& hotkeys,
+				std::atomic_int& editingSlot,
+				bool suspendList)
 			{
-				ImGui::SameLine();
-				if (ImGui::Button("OK"))
-					endGlobalSuspensionHotkeyEditing(true);
+				ImGui::Separator();
+				ImGui::TextUnformatted(label);
 
-				ImGui::SameLine();
-				if (ImGui::Button("Cancel"))
-					endGlobalSuspensionHotkeyEditing(false);
-			}
-			else
-			{
-				ImGui::SameLine();
-				if (ImGui::Button("Remove"))
+				for (size_t hotkeyIndex = 0; hotkeyIndex < hotkeys.size(); ++hotkeyIndex)
 				{
-					g_globalSuspensionHotkeys.erase(
-						g_globalSuspensionHotkeys.begin() + static_cast<std::ptrdiff_t>(hotkeyIndex));
-					saveShaderTogglerIniFile();
+					ImGui::PushID(suspendList ? static_cast<int>(hotkeyIndex) :
+						10000 + static_cast<int>(hotkeyIndex));
+
+					const bool editingThisHotkey =
+						editingSlot == static_cast<int>(hotkeyIndex);
+
+					const std::string hotkeyText =
+						editingThisHotkey ? g_keyCollector.getKeyAsString() :
+						hotkeys[hotkeyIndex].getKeyAsString();
+
+					char hotkeyBuffer[128] = {};
+					strncpy_s(hotkeyBuffer, sizeof(hotkeyBuffer), hotkeyText.c_str(), _TRUNCATE);
+					ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.45f);
+					ImGui::InputText("##GlobalHotkey", hotkeyBuffer, sizeof(hotkeyBuffer), ImGuiInputTextFlags_ReadOnly);
+					if (ImGui::IsItemClicked())
+						startGlobalHotkeyEditing(suspendList, static_cast<int>(hotkeyIndex));
+					ImGui::PopItemWidth();
+
+					if (editingThisHotkey)
+					{
+						ImGui::SameLine();
+						if (ImGui::Button("OK"))
+							endGlobalHotkeyEditing(suspendList, true);
+
+						ImGui::SameLine();
+						if (ImGui::Button("Cancel"))
+							endGlobalHotkeyEditing(suspendList, false);
+					}
+					else
+					{
+						ImGui::SameLine();
+						if (ImGui::Button("Remove"))
+						{
+							hotkeys.erase(
+								hotkeys.begin() + static_cast<std::ptrdiff_t>(hotkeyIndex));
+							saveShaderTogglerIniFile();
+							ImGui::PopID();
+							break;
+						}
+					}
+
 					ImGui::PopID();
-					break;
 				}
-			}
 
-			ImGui::PopID();
-		}
+				const int addHotkeyIndex = static_cast<int>(hotkeys.size());
+				const bool editingNewHotkey = editingSlot == addHotkeyIndex;
+				const std::string addHotkeyText =
+					editingNewHotkey ? g_keyCollector.getKeyAsString() : "Add hotkey";
 
-		const int addHotkeyIndex = static_cast<int>(g_globalSuspensionHotkeys.size());
-		const bool editingNewHotkey = g_globalSuspensionHotkeySlotEditing == addHotkeyIndex;
-		const std::string addHotkeyText =
-			editingNewHotkey ? g_keyCollector.getKeyAsString() : "Add hotkey";
+				char addHotkeyBuffer[128] = {};
+				strncpy_s(addHotkeyBuffer, sizeof(addHotkeyBuffer), addHotkeyText.c_str(), _TRUNCATE);
+				ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.45f);
+				ImGui::InputText("##AddGlobalHotkey", addHotkeyBuffer, sizeof(addHotkeyBuffer), ImGuiInputTextFlags_ReadOnly);
+				if (ImGui::IsItemClicked())
+					startGlobalHotkeyEditing(suspendList, addHotkeyIndex);
+				ImGui::PopItemWidth();
 
-		char addHotkeyBuffer[128] = {};
-		strncpy_s(addHotkeyBuffer, sizeof(addHotkeyBuffer), addHotkeyText.c_str(), _TRUNCATE);
-		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.45f);
-		ImGui::InputText("##AddGlobalSuspensionHotkey", addHotkeyBuffer, sizeof(addHotkeyBuffer), ImGuiInputTextFlags_ReadOnly);
-		if (ImGui::IsItemClicked())
-			startGlobalSuspensionHotkeyEditing(addHotkeyIndex);
-		ImGui::PopItemWidth();
+				if (editingNewHotkey)
+				{
+					ImGui::SameLine();
+					if (ImGui::Button("OK##AddGlobalHotkey"))
+						endGlobalHotkeyEditing(suspendList, true);
 
-		if (editingNewHotkey)
-		{
-			ImGui::SameLine();
-			if (ImGui::Button("OK##AddGlobalSuspensionHotkey"))
-				endGlobalSuspensionHotkeyEditing(true);
+					ImGui::SameLine();
+					if (ImGui::Button("Cancel##AddGlobalHotkey"))
+						endGlobalHotkeyEditing(suspendList, false);
+				}
+			};
 
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel##AddGlobalSuspensionHotkey"))
-				endGlobalSuspensionHotkeyEditing(false);
-		}
+		drawGlobalHotkeyList(
+			"Suspend Hotkeys (menu open)",
+			g_globalSuspendHotkeys,
+			g_globalSuspendHotkeySlotEditing,
+			true);
 
 		ImGui::SameLine();
-		showHelpMarker("Assign multiple keyboard, mouse, or controller hotkeys. No default hotkey is assigned.");
+		showHelpMarker("Only checked during gameplay.");
 
-		if (!g_globalSuspensionHotkeys.empty())
+		drawGlobalHotkeyList(
+			"Restore Hotkeys (menu close/back)",
+			g_globalRestoreHotkeys,
+			g_globalRestoreHotkeySlotEditing,
+			false);
+
+		ImGui::SameLine();
+		showHelpMarker("Only checked while groups are suspended. Back/B therefore cannot affect normal gameplay.");
+
+		if (!g_globalSuspendHotkeys.empty() || !g_globalRestoreHotkeys.empty())
 		{
-			if (ImGui::Button("Clear all hotkeys"))
+			ImGui::Separator();
+			if (ImGui::Button("Clear all suspension hotkeys"))
 			{
-				g_globalSuspensionHotkeys.clear();
-				g_globalSuspensionHotkeySlotEditing = -1;
+				g_globalSuspendHotkeys.clear();
+				g_globalRestoreHotkeys.clear();
+				g_globalSuspendHotkeySlotEditing = -1;
+				g_globalRestoreHotkeySlotEditing = -1;
 				g_keyCollector.clear();
+
 				if (g_allToggleGroupsSuspended)
 					restoreAllToggleGroups();
+
 				saveShaderTogglerIniFile();
 			}
 		}
@@ -2520,7 +2641,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	if (g_toggleGroupIdKeyBindingEditing >= 0 ||
 		g_toggleGroupIdTimedTriggerKeyEditing >= 0 ||
 		g_toggleGroupIdTimedSuppressionKeyEditing >= 0 ||
-		g_globalSuspensionHotkeySlotEditing >= 0)
+		g_globalSuspendHotkeySlotEditing >= 0 ||
+		g_globalRestoreHotkeySlotEditing >= 0)
 	{
 		// Do not capture a mouse button while it is being used on an ImGui
 		// control. ImGui buttons activate on release, so checking only after

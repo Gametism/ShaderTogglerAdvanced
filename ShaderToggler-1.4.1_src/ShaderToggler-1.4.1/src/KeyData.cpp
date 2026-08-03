@@ -30,7 +30,7 @@ namespace ShaderToggler
 			return STA_KEYDATA_UNIT_TAG_B;
 		}
 
-//GT
+		// Custom codes stored in the normal 8-bit key slot
 		constexpr uint8_t GPAD_A          = 240;
 		constexpr uint8_t GPAD_B          = 241;
 		constexpr uint8_t GPAD_X          = 242;
@@ -624,7 +624,13 @@ namespace ShaderToggler
 
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
-		const bool usePlayStationLabels = shouldUsePlayStationLabels();
+		// Only detect the controller type when formatting an actual gamepad
+		// binding. KeyData objects are constructed while the add-on DLL is still
+		// loading, and their default key code is zero. Running device enumeration
+		// for that empty key can keep DllMain busy long enough for ReShade to mark
+		// the add-on as failed.
+		const bool usePlayStationLabels =
+			isGamepadCode(vkCode) && shouldUsePlayStationLabels();
 
 		switch (vkCode)
 		{

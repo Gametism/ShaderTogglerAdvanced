@@ -18,6 +18,7 @@
 #include <fstream>
 #include <string>
 #include <cstdint>
+#include <filesystem>
 
 using namespace std;
 
@@ -90,10 +91,10 @@ class CDataFile
 {
 public:
 	CDataFile();
-	CDataFile(t_Str szFileName);
+	CDataFile(const std::filesystem::path& fileName);
 	virtual ~CDataFile();
 
-	bool Load(t_Str szFileName);
+	bool Load(const std::filesystem::path& fileName);
 	bool Save();
 
 	t_Str    GetValue(t_Str szKey, t_Str szSection = t_Str(""));
@@ -133,7 +134,7 @@ public:
 	int  SectionCount();
 	int  KeyCount();
 	void Clear();
-	void SetFileName(t_Str szFileName);
+	void SetFileName(const std::filesystem::path& fileName);
 	t_Str CommentStr(t_Str szComment);
 
 	// -----------------------------------------------------------------
@@ -154,6 +155,6 @@ public:
 
 protected:
 	SectionList m_Sections;
-	t_Str m_szFileName;
+	std::filesystem::path m_szFileName;
 	bool m_bDirty;
 };

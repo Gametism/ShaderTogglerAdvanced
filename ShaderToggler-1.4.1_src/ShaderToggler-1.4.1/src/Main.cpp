@@ -60,7 +60,7 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 };
 
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250
-#define HASH_FILE_NAME "ShaderToggler.ini"
+#define HASH_FILE_NAME L"ShaderToggler.ini"
 
 static ShaderManager g_pixelShaderManager;
 static ShaderManager g_vertexShaderManager;
@@ -83,7 +83,7 @@ static std::chrono::steady_clock::time_point g_globalSuspensionStarted;
 static std::unordered_set<int> g_pendingSuspendedGroupToggles;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
-static std::string g_iniFileName = "";
+static std::filesystem::path g_iniFileName;
 
 // 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
@@ -533,7 +533,7 @@ static std::string buildIniSignature()
 	return toHex64(fnv1a64(data));
 }
 
-static bool fileContainsTopAndBottomWatermark(const std::string& filename)
+static bool fileContainsTopAndBottomWatermark(const std::filesystem::path& filename)
 {
 	std::ifstream inFile(filename, std::ios::binary);
 	if (!inFile.is_open())
@@ -549,7 +549,7 @@ static bool fileContainsTopAndBottomWatermark(const std::string& filename)
 	return hasHeader && hasFooter;
 }
 
-static void rewriteIniWithTopAndBottomWatermark(const std::string& filename)
+static void rewriteIniWithTopAndBottomWatermark(const std::filesystem::path& filename)
 {
 	std::ifstream inFile(filename, std::ios::binary);
 	if (!inFile.is_open())
@@ -2688,189 +2688,51 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	}
 }
 
-
-static std::wstring g_initTraceFileName;
-
-static void writeInitializationTrace(const char* message)
-{
-	if (message == nullptr)
-		return;
-
-	if (g_initTraceFileName.empty())
-	{
-		WCHAR executablePath[MAX_PATH] = {};
-		if (GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath)) != 0)
-		{
-			const std::filesystem::path tracePath =
-				std::filesystem::path(executablePath).parent_path() /
-				L"ShaderToggler_InitTrace.log";
-			g_initTraceFileName = tracePath.wstring();
-		}
-		else
-		{
-			g_initTraceFileName = L"ShaderToggler_InitTrace.log";
-		}
-	}
-
-	HANDLE traceFile = CreateFileW(
-		g_initTraceFileName.c_str(),
-		FILE_APPEND_DATA,
-		FILE_SHARE_READ | FILE_SHARE_WRITE,
-		nullptr,
-		OPEN_ALWAYS,
-		FILE_ATTRIBUTE_NORMAL,
-		nullptr);
-
-	if (traceFile == INVALID_HANDLE_VALUE)
-		return;
-
-	SYSTEMTIME localTime = {};
-	GetLocalTime(&localTime);
-
-	char line[1024] = {};
-	const int lineLength = snprintf(
-		line,
-		sizeof(line),
-		"%02u:%02u:%02u.%03u | %llu ms | %s\r\n",
-		static_cast<unsigned int>(localTime.wHour),
-		static_cast<unsigned int>(localTime.wMinute),
-		static_cast<unsigned int>(localTime.wSecond),
-		static_cast<unsigned int>(localTime.wMilliseconds),
-		static_cast<unsigned long long>(GetTickCount64()),
-		message);
-
-	if (lineLength > 0)
-	{
-		DWORD bytesWritten = 0;
-		WriteFile(
-			traceFile,
-			line,
-			static_cast<DWORD>(lineLength),
-			&bytesWritten,
-			nullptr);
-	}
-
-	FlushFileBuffers(traceFile);
-	CloseHandle(traceFile);
-}
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 {
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH:
 	{
-		writeInitializationTrace("DLL_PROCESS_ATTACH entered");
-
-		writeInitializationTrace("register_addon: starting");
 		if (!reshade::register_addon(hModule))
 		{
-			writeInitializationTrace("register_addon: FAILED");
 			return FALSE;
 		}
-		writeInitializationTrace("register_addon: completed");
-
-		writeInitializationTrace("executable path setup: starting");
-		OutputDebugStringA("ShaderToggler: path step A - buffer declaration\n");
 
 		WCHAR buf[MAX_PATH] = {};
-		writeInitializationTrace("path step A completed: buffer declared");
-		OutputDebugStringA("ShaderToggler: path step B - GetModuleFileNameW starting\n");
+		if (GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) != 0)
+		{
+			const std::filesystem::path executablePath(buf);
+			g_iniFileName = executablePath.parent_path() / HASH_FILE_NAME;
+		}
+		else
+		{
+			g_iniFileName = HASH_FILE_NAME;
+		}
 
-		const DWORD executablePathLength =
-			GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf));
-		writeInitializationTrace("path step B completed: GetModuleFileNameW returned");
-		OutputDebugStringA("ShaderToggler: path step C - filesystem path construction starting\n");
-
-		std::filesystem::path dllPath;
-		if (executablePathLength != 0)
-			dllPath = std::filesystem::path(buf);
-
-		writeInitializationTrace("path step C completed: filesystem path constructed");
-		OutputDebugStringA("ShaderToggler: path step D - parent_path starting\n");
-
-		const std::filesystem::path basePath = dllPath.parent_path();
-		writeInitializationTrace("path step D completed: parent_path returned");
-		OutputDebugStringA("ShaderToggler: path step E - path append starting\n");
-
-		const std::filesystem::path iniPath = basePath / HASH_FILE_NAME;
-		writeInitializationTrace("path step E completed: INI path appended");
-		OutputDebugStringA("ShaderToggler: path step F - narrow string conversion starting\n");
-
-		g_iniFileName = iniPath.string();
-		writeInitializationTrace("path step F completed: narrow string conversion returned");
-		OutputDebugStringA("ShaderToggler: executable path setup completed\n");
-
-		writeInitializationTrace("executable path setup: completed");
-
-		writeInitializationTrace("controller type detection: starting");
 		KeyData::refreshControllerTypeDetection();
-		writeInitializationTrace("controller type detection: completed");
 
-		writeInitializationTrace("register init_pipeline: starting");
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
-		writeInitializationTrace("register init_pipeline: completed");
-
-		writeInitializationTrace("register init_command_list: starting");
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
-		writeInitializationTrace("register init_command_list: completed");
-
-		writeInitializationTrace("register destroy_command_list: starting");
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
-		writeInitializationTrace("register destroy_command_list: completed");
-
-		writeInitializationTrace("register reset_command_list: starting");
 		reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
-		writeInitializationTrace("register reset_command_list: completed");
-
-		writeInitializationTrace("register destroy_pipeline: starting");
 		reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
-		writeInitializationTrace("register destroy_pipeline: completed");
-
-		writeInitializationTrace("register reshade_overlay: starting");
 		reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
-		writeInitializationTrace("register reshade_overlay: completed");
-
-		writeInitializationTrace("register reshade_present: starting");
 		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
-		writeInitializationTrace("register reshade_present: completed");
-
-		writeInitializationTrace("register bind_pipeline: starting");
 		reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
-		writeInitializationTrace("register bind_pipeline: completed");
-
-		writeInitializationTrace("register draw: starting");
 		reshade::register_event<reshade::addon_event::draw>(onDraw);
-		writeInitializationTrace("register draw: completed");
-
-		writeInitializationTrace("register draw_indexed: starting");
 		reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
-		writeInitializationTrace("register draw_indexed: completed");
-
-		writeInitializationTrace("register draw_or_dispatch_indirect: starting");
 		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
-		writeInitializationTrace("register draw_or_dispatch_indirect: completed");
-
-		writeInitializationTrace("register overlay UI: starting");
 		reshade::register_overlay(nullptr, &displaySettings);
-		writeInitializationTrace("register overlay UI: completed");
 
-		writeInitializationTrace("load ShaderToggler.ini: starting");
 		loadShaderTogglerIniFile();
-		writeInitializationTrace("load ShaderToggler.ini: completed");
-
-		writeInitializationTrace("DLL_PROCESS_ATTACH completed successfully");
 	}
 	break;
 
 	case DLL_PROCESS_DETACH:
-		writeInitializationTrace("DLL_PROCESS_DETACH entered");
-
 		g_allToggleGroupsSuspended = false;
 		g_pendingSuspendedGroupToggles.clear();
 		g_globalSuspensionStarted = {};
-
-		writeInitializationTrace("unregister events: starting");
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
@@ -2883,11 +2745,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
 		reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);
 		reshade::unregister_overlay(nullptr, &displaySettings);
-		writeInitializationTrace("unregister events: completed");
-
-		writeInitializationTrace("unregister_addon: starting");
 		reshade::unregister_addon(hModule);
-		writeInitializationTrace("unregister_addon: completed");
 		break;
 	}
 

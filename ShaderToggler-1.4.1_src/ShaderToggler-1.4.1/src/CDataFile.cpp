@@ -61,10 +61,10 @@
 // CDataFile
 // Our default contstructor.  If it can load the file, it will do so and populate
 // the section list with the values from the file.
-CDataFile::CDataFile(t_Str szFileName)
+CDataFile::CDataFile(const std::filesystem::path& fileName)
 {
 	m_bDirty = false;
-	m_szFileName = szFileName;
+	m_szFileName = fileName;
 	m_Flags = (AUTOCREATE_SECTIONS | AUTOCREATE_KEYS);
 	m_Sections.push_back(*(new t_Section));
 
@@ -91,35 +91,33 @@ CDataFile::~CDataFile()
 void CDataFile::Clear()
 {
 	m_bDirty = false;
-	m_szFileName = t_Str("");
+	m_szFileName.clear();
 	m_Sections.clear();
 }
 
 // SetFileName
 // Set's the m_szFileName member variable. For use when creating the CDataFile
 // object by hand (-vs- loading it from a file
-void CDataFile::SetFileName(t_Str szFileName)
+void CDataFile::SetFileName(const std::filesystem::path& fileName)
 {
-	if (m_szFileName.size() != 0 && CompareNoCase(szFileName, m_szFileName) != 0)
+	if (!m_szFileName.empty() && m_szFileName != fileName)
 	{
 		m_bDirty = true;
-
-		Report(E_WARN, "[CDataFile::SetFileName] The filename has changed from <%s> to <%s>.",
-			m_szFileName.c_str(), szFileName.c_str());
+		Report(E_WARN, "[CDataFile::SetFileName] The filename has changed.");
 	}
 
-	m_szFileName = szFileName;
+	m_szFileName = fileName;
 }
 
 // Load
 // Attempts to load in the text file. If successful it will populate the 
 // Section list with the key/value pairs found in the file. Note that comments
 // are saved so that they can be rewritten to the file later.
-bool CDataFile::Load(t_Str szFileName)
+bool CDataFile::Load(const std::filesystem::path& fileName)
 {
 	// We dont want to create a new file here.  If it doesn't exist, just
 	// return false and report the failure.
-	fstream File(szFileName.c_str(), ios::in);
+	fstream File(fileName, ios::in);
 
 	if (File.is_open())
 	{
@@ -205,13 +203,13 @@ bool CDataFile::Save()
 		return false;
 	}
 
-	if (m_szFileName.size() == 0)
+	if (m_szFileName.empty())
 	{
 		Report(E_ERROR, "[CDataFile::Save] No filename has been set.");
 		return false;
 	}
 
-	fstream File(m_szFileName.c_str(), ios::out | ios::trunc);
+	fstream File(m_szFileName, ios::out | ios::trunc);
 
 	if (File.is_open())
 	{

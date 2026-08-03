@@ -877,3 +877,4 @@ void Report(e_DebugLevel DebugLevel, const char* fmt, ...)
 
 	printf(szMsg.c_str());
 }
+//GT

@@ -158,3 +158,4 @@ protected:
 	std::filesystem::path m_szFileName;
 	bool m_bDirty;
 };
+//GT

@@ -624,11 +624,7 @@ namespace ShaderToggler
 
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
-		// Controller detection is only needed when formatting an actual
-		// gamepad binding. Default, keyboard and mouse KeyData objects are
-		// constructed while the add-on DLL is loading and must remain cheap.
-		const bool usePlayStationLabels =
-			isGamepadCode(vkCode) && shouldUsePlayStationLabels();
+		const bool usePlayStationLabels = shouldUsePlayStationLabels();
 
 		switch (vkCode)
 		{

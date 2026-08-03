@@ -166,3 +166,4 @@ namespace ShaderToggler
 		std::unordered_set<uint32_t> m_computeShaderHashes;
 	};
 }
+//GT

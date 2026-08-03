@@ -84,7 +84,6 @@ static std::unordered_set<int> g_pendingSuspendedGroupToggles;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
-static bool g_runtimeConfigurationLoaded = false;
 
 // 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
@@ -1069,30 +1068,6 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 	default:
 		return false;
 	}
-}
-
-static void onInitEffectRuntime(effect_runtime*)
-{
-	if (g_runtimeConfigurationLoaded)
-		return;
-
-	WCHAR executablePath[MAX_PATH] = {};
-	if (GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath)) != 0)
-	{
-		const std::filesystem::path basePath =
-			std::filesystem::path(executablePath).parent_path();
-		g_iniFileName = (basePath / HASH_FILE_NAME).string();
-	}
-	else
-	{
-		g_iniFileName = HASH_FILE_NAME;
-	}
-
-	// Configuration loading and device detection must happen after ReShade has
-	// created a valid runtime, not while the DLL is inside its loader callback.
-	loadShaderTogglerIniFile();
-	KeyData::refreshControllerTypeDetection();
-	g_runtimeConfigurationLoaded = true;
 }
 
 static void onReshadePresent(effect_runtime* runtime)
@@ -2713,39 +2688,166 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 	}
 }
 
+
+static std::wstring g_initTraceFileName;
+
+static void writeInitializationTrace(const char* message)
+{
+	if (message == nullptr)
+		return;
+
+	if (g_initTraceFileName.empty())
+	{
+		WCHAR executablePath[MAX_PATH] = {};
+		if (GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath)) != 0)
+		{
+			const std::filesystem::path tracePath =
+				std::filesystem::path(executablePath).parent_path() /
+				L"ShaderToggler_InitTrace.log";
+			g_initTraceFileName = tracePath.wstring();
+		}
+		else
+		{
+			g_initTraceFileName = L"ShaderToggler_InitTrace.log";
+		}
+	}
+
+	HANDLE traceFile = CreateFileW(
+		g_initTraceFileName.c_str(),
+		FILE_APPEND_DATA,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		nullptr,
+		OPEN_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL,
+		nullptr);
+
+	if (traceFile == INVALID_HANDLE_VALUE)
+		return;
+
+	SYSTEMTIME localTime = {};
+	GetLocalTime(&localTime);
+
+	char line[1024] = {};
+	const int lineLength = snprintf(
+		line,
+		sizeof(line),
+		"%02u:%02u:%02u.%03u | %llu ms | %s\r\n",
+		static_cast<unsigned int>(localTime.wHour),
+		static_cast<unsigned int>(localTime.wMinute),
+		static_cast<unsigned int>(localTime.wSecond),
+		static_cast<unsigned int>(localTime.wMilliseconds),
+		static_cast<unsigned long long>(GetTickCount64()),
+		message);
+
+	if (lineLength > 0)
+	{
+		DWORD bytesWritten = 0;
+		WriteFile(
+			traceFile,
+			line,
+			static_cast<DWORD>(lineLength),
+			&bytesWritten,
+			nullptr);
+	}
+
+	FlushFileBuffers(traceFile);
+	CloseHandle(traceFile);
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 {
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH:
 	{
+		writeInitializationTrace("DLL_PROCESS_ATTACH entered");
+
+		writeInitializationTrace("register_addon: starting");
 		if (!reshade::register_addon(hModule))
 		{
+			writeInitializationTrace("register_addon: FAILED");
 			return FALSE;
 		}
+		writeInitializationTrace("register_addon: completed");
 
-		reshade::register_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
+		writeInitializationTrace("executable path setup: starting");
+		WCHAR buf[MAX_PATH] = {};
+		const std::filesystem::path dllPath =
+			GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ?
+			buf :
+			std::filesystem::path();
+		const std::filesystem::path basePath = dllPath.parent_path();
+		g_iniFileName = (basePath / HASH_FILE_NAME).string();
+		writeInitializationTrace("executable path setup: completed");
+
+		writeInitializationTrace("controller type detection: starting");
+		KeyData::refreshControllerTypeDetection();
+		writeInitializationTrace("controller type detection: completed");
+
+		writeInitializationTrace("register init_pipeline: starting");
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
-		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
-		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
-		reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
-		reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
-		reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
-		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
-		reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
-		reshade::register_event<reshade::addon_event::draw>(onDraw);
-		reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
-		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
-		reshade::register_overlay(nullptr, &displaySettings);
+		writeInitializationTrace("register init_pipeline: completed");
 
+		writeInitializationTrace("register init_command_list: starting");
+		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
+		writeInitializationTrace("register init_command_list: completed");
+
+		writeInitializationTrace("register destroy_command_list: starting");
+		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
+		writeInitializationTrace("register destroy_command_list: completed");
+
+		writeInitializationTrace("register reset_command_list: starting");
+		reshade::register_event<reshade::addon_event::reset_command_list>(onResetCommandList);
+		writeInitializationTrace("register reset_command_list: completed");
+
+		writeInitializationTrace("register destroy_pipeline: starting");
+		reshade::register_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
+		writeInitializationTrace("register destroy_pipeline: completed");
+
+		writeInitializationTrace("register reshade_overlay: starting");
+		reshade::register_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
+		writeInitializationTrace("register reshade_overlay: completed");
+
+		writeInitializationTrace("register reshade_present: starting");
+		reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
+		writeInitializationTrace("register reshade_present: completed");
+
+		writeInitializationTrace("register bind_pipeline: starting");
+		reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
+		writeInitializationTrace("register bind_pipeline: completed");
+
+		writeInitializationTrace("register draw: starting");
+		reshade::register_event<reshade::addon_event::draw>(onDraw);
+		writeInitializationTrace("register draw: completed");
+
+		writeInitializationTrace("register draw_indexed: starting");
+		reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
+		writeInitializationTrace("register draw_indexed: completed");
+
+		writeInitializationTrace("register draw_or_dispatch_indirect: starting");
+		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
+		writeInitializationTrace("register draw_or_dispatch_indirect: completed");
+
+		writeInitializationTrace("register overlay UI: starting");
+		reshade::register_overlay(nullptr, &displaySettings);
+		writeInitializationTrace("register overlay UI: completed");
+
+		writeInitializationTrace("load ShaderToggler.ini: starting");
+		loadShaderTogglerIniFile();
+		writeInitializationTrace("load ShaderToggler.ini: completed");
+
+		writeInitializationTrace("DLL_PROCESS_ATTACH completed successfully");
 	}
 	break;
 
 	case DLL_PROCESS_DETACH:
+		writeInitializationTrace("DLL_PROCESS_DETACH entered");
+
 		g_allToggleGroupsSuspended = false;
 		g_pendingSuspendedGroupToggles.clear();
 		g_globalSuspensionStarted = {};
-		reshade::unregister_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
+
+		writeInitializationTrace("unregister events: starting");
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
@@ -2758,7 +2860,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
 		reshade::unregister_event<reshade::addon_event::reset_command_list>(onResetCommandList);
 		reshade::unregister_overlay(nullptr, &displaySettings);
+		writeInitializationTrace("unregister events: completed");
+
+		writeInitializationTrace("unregister_addon: starting");
 		reshade::unregister_addon(hModule);
+		writeInitializationTrace("unregister_addon: completed");
 		break;
 	}
 

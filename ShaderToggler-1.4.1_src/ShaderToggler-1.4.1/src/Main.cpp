@@ -2771,13 +2771,36 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		writeInitializationTrace("register_addon: completed");
 
 		writeInitializationTrace("executable path setup: starting");
+		OutputDebugStringA("ShaderToggler: path step A - buffer declaration\n");
+
 		WCHAR buf[MAX_PATH] = {};
-		const std::filesystem::path dllPath =
-			GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ?
-			buf :
-			std::filesystem::path();
+		writeInitializationTrace("path step A completed: buffer declared");
+		OutputDebugStringA("ShaderToggler: path step B - GetModuleFileNameW starting\n");
+
+		const DWORD executablePathLength =
+			GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf));
+		writeInitializationTrace("path step B completed: GetModuleFileNameW returned");
+		OutputDebugStringA("ShaderToggler: path step C - filesystem path construction starting\n");
+
+		std::filesystem::path dllPath;
+		if (executablePathLength != 0)
+			dllPath = std::filesystem::path(buf);
+
+		writeInitializationTrace("path step C completed: filesystem path constructed");
+		OutputDebugStringA("ShaderToggler: path step D - parent_path starting\n");
+
 		const std::filesystem::path basePath = dllPath.parent_path();
-		g_iniFileName = (basePath / HASH_FILE_NAME).string();
+		writeInitializationTrace("path step D completed: parent_path returned");
+		OutputDebugStringA("ShaderToggler: path step E - path append starting\n");
+
+		const std::filesystem::path iniPath = basePath / HASH_FILE_NAME;
+		writeInitializationTrace("path step E completed: INI path appended");
+		OutputDebugStringA("ShaderToggler: path step F - narrow string conversion starting\n");
+
+		g_iniFileName = iniPath.string();
+		writeInitializationTrace("path step F completed: narrow string conversion returned");
+		OutputDebugStringA("ShaderToggler: executable path setup completed\n");
+
 		writeInitializationTrace("executable path setup: completed");
 
 		writeInitializationTrace("controller type detection: starting");

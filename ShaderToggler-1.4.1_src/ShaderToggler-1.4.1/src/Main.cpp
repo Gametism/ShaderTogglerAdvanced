@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
+#include <mutex>
 
 #ifdef min
 #undef min
@@ -84,6 +85,7 @@ static std::unordered_set<int> g_pendingSuspendedGroupToggles;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
+static std::once_flag g_runtimeInitializationOnce;
 
 // 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
@@ -785,6 +787,34 @@ void loadShaderTogglerIniFile()
 	}
 }
 
+
+static void ensureShaderTogglerRuntimeInitialized()
+{
+	std::call_once(g_runtimeInitializationOnce,
+		[]()
+		{
+			WCHAR executablePath[MAX_PATH] = {};
+			if (GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath)) != 0)
+			{
+				const std::filesystem::path basePath =
+					std::filesystem::path(executablePath).parent_path();
+				g_iniFileName = (basePath / HASH_FILE_NAME).string();
+			}
+			else
+			{
+				g_iniFileName = HASH_FILE_NAME;
+			}
+
+			// Device/controller enumeration and configuration file I/O must not
+			// run from DllMain. Some games create ReShade before their final
+			// graphics runtime is ready and reject add-ons that spend too long
+			// inside the Windows loader lock.
+			KeyData::refreshControllerTypeDetection();
+			loadShaderTogglerIniFile();
+		});
+}
+
+
 void saveShaderTogglerIniFile()
 {
 	CDataFile iniFile;
@@ -1072,6 +1102,7 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 
 static void onReshadePresent(effect_runtime* runtime)
 {
+	ensureShaderTogglerRuntimeInitialized();
 	const auto mouseCaptureNow = std::chrono::steady_clock::now();
 	const bool mouseCapturedByOverlay =
 		g_overlayMouseCaptureLastSeen.time_since_epoch().count() != 0 &&
@@ -1715,6 +1746,7 @@ static void showHelpMarker(const char* desc)
 
 static void displaySettings(reshade::api::effect_runtime* runtime)
 {
+	ensureShaderTogglerRuntimeInitialized();
 	applyModernUiStyle();
 
 	if (ImGui::CollapsingHeader("General info and help"))
@@ -2699,13 +2731,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			return FALSE;
 		}
 
-		WCHAR buf[MAX_PATH];
-		const std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ? buf : std::filesystem::path();
-		const std::filesystem::path basePath = dllPath.parent_path();
-		g_iniFileName = (basePath / HASH_FILE_NAME).string();
-
-		KeyData::refreshControllerTypeDetection();
-
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -2719,7 +2744,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 		reshade::register_overlay(nullptr, &displaySettings);
 
-		loadShaderTogglerIniFile();
 	}
 	break;
 

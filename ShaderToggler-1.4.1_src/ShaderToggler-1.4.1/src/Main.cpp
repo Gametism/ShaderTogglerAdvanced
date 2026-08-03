@@ -84,6 +84,7 @@ static std::unordered_set<int> g_pendingSuspendedGroupToggles;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
 static std::string g_iniFileName = "";
+static bool g_runtimeConfigurationLoaded = false;
 
 // 
 static std::unordered_map<int, bool> g_groupHotkeyWasDown;
@@ -1068,6 +1069,30 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 	default:
 		return false;
 	}
+}
+
+static void onInitEffectRuntime(effect_runtime*)
+{
+	if (g_runtimeConfigurationLoaded)
+		return;
+
+	WCHAR executablePath[MAX_PATH] = {};
+	if (GetModuleFileNameW(nullptr, executablePath, ARRAYSIZE(executablePath)) != 0)
+	{
+		const std::filesystem::path basePath =
+			std::filesystem::path(executablePath).parent_path();
+		g_iniFileName = (basePath / HASH_FILE_NAME).string();
+	}
+	else
+	{
+		g_iniFileName = HASH_FILE_NAME;
+	}
+
+	// Configuration loading and device detection must happen after ReShade has
+	// created a valid runtime, not while the DLL is inside its loader callback.
+	loadShaderTogglerIniFile();
+	KeyData::refreshControllerTypeDetection();
+	g_runtimeConfigurationLoaded = true;
 }
 
 static void onReshadePresent(effect_runtime* runtime)
@@ -2699,16 +2724,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			return FALSE;
 		}
 
-		WCHAR buf[MAX_PATH];
-		const std::filesystem::path dllPath = GetModuleFileNameW(nullptr, buf, ARRAYSIZE(buf)) ? buf : std::filesystem::path();
-		const std::filesystem::path basePath = dllPath.parent_path();
-		g_iniFileName = (basePath / HASH_FILE_NAME).string();
-
-		// Do not enumerate controller devices during add-on initialization.
-		// Some games enforce a short ReShade add-on startup timeout, and device
-		// enumeration can cause the add-on to be marked as failed before its UI
-		// is registered. Auto label detection remains available later from the
-		// ShaderToggler settings interface.
+		reshade::register_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -2722,7 +2738,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 		reshade::register_overlay(nullptr, &displaySettings);
 
-		loadShaderTogglerIniFile();
 	}
 	break;
 
@@ -2730,6 +2745,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		g_allToggleGroupsSuspended = false;
 		g_pendingSuspendedGroupToggles.clear();
 		g_globalSuspensionStarted = {};
+		reshade::unregister_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);

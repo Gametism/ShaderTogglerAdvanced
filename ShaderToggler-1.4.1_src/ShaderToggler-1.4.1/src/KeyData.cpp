@@ -624,11 +624,9 @@ namespace ShaderToggler
 
 	std::string KeyData::vkCodeToString(uint8_t vkCode)
 	{
-		// Only detect the controller type when formatting an actual gamepad
-		// binding. KeyData objects are constructed while the add-on DLL is still
-		// loading, and their default key code is zero. Running device enumeration
-		// for that empty key can keep DllMain busy long enough for ReShade to mark
-		// the add-on as failed.
+		// Controller detection is only needed when formatting an actual
+		// gamepad binding. Default, keyboard and mouse KeyData objects are
+		// constructed while the add-on DLL is loading and must remain cheap.
 		const bool usePlayStationLabels =
 			isGamepadCode(vkCode) && shouldUsePlayStationLabels();
 

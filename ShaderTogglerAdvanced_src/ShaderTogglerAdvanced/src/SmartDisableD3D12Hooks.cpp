@@ -69,7 +69,6 @@ namespace ShaderToggler::smart::dx12
                 catch (...) { diagnostics::Write("[ERROR] SMART DirectX 12 pipeline capture allocation failed; original pipeline retained."); }
             }
         }
-        // Each pipeline stream subobject uses pointer alignment, including on x86.
         template<class T> struct alignas(void*) StreamItem { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type; T data; };
         template<class T> bool readItem(const uint8_t*& cursor, const uint8_t* end, T& out)
         {
@@ -195,7 +194,6 @@ namespace ShaderToggler::smart::dx12
             const auto hr = next(dev, desc, root, iid, out);
             if (SUCCEEDED(hr) && desc && out && *out && iid == __uuidof(ID3D12CommandSignature) && findState(dev))
             {
-                // Plain private bytes have no add-on-owned destructor or lifetime.
                 const UINT graphics = graphicsSignature(*desc) ? 1u : 0u;
                 static_cast<ID3D12CommandSignature*>(*out)->SetPrivateData(signatureGuid, sizeof(graphics), &graphics);
                 const auto info=finderSignature(*desc);
@@ -221,8 +219,6 @@ namespace ShaderToggler::smart::dx12
                 const bool canSkip=!(info.kind&~0x1FFu) && kind>=1 && kind<=3 && (!bindings || kind<=2);
                 if(finder(cmd,info.kind,maxCount,info.stride,canSkip) && canSkip)
                 {
-                    // A filtered graphics submission still performs the API's
-                    // binding resets. Do not drop a binding-update call outright.
                     if(bindings) next(nativeCommands,signature,0,arguments,offset,counts,countOffset);
                     return;
                 }
@@ -235,10 +231,6 @@ namespace ShaderToggler::smart::dx12
                 const bool verifiedGraphics = SUCCEEDED(signature->GetPrivateData(signatureGuid, &bytes, &graphics)) && bytes == sizeof(graphics) && graphics == 1;
                 restore(cmd);
                 const bool blocked = prepare(cmd, verifiedGraphics);
-                // Retain ExecuteIndirect's reset of the root/VB/IB bindings it
-                // changes, even when original ShaderToggler matching hides the
-                // submission. A zero maximum prevents any draw/dispatch work.
-                // https://learn.microsoft.com/windows/win32/direct3d12/indirect-drawing
                 next(nativeCommands, signature, blocked ? 0 : maxCount, arguments, offset, counts, countOffset);
             }
             else next(nativeCommands, signature, maxCount, arguments, offset, counts, countOffset);
@@ -369,8 +361,6 @@ namespace ShaderToggler::smart::dx12
     void shutdownCapture(bool processExit)
     {
         if (!initialized || processExit) return;
-        // ReShade stops using the add-on before unloading it. Drain GPU work
-        // before releasing PSOs which recorded commands may still reference.
         std::vector<device*> owners;
         { std::lock_guard lock(registryMutex); for (const auto& [key, entry] : devices)
             if (std::find(owners.begin(), owners.end(), entry.owner) == owners.end()) owners.push_back(entry.owner); }

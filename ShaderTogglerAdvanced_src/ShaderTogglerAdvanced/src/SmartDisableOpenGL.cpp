@@ -377,8 +377,6 @@ namespace ShaderToggler::smart::other::gl
         f.GetProgramResourceiv(program,GL_PROGRAM_OUTPUT,0,4,props,4,nullptr,values);
         if (values[1] != 0 || values[2] != 1 || values[3] != 0 ||
             (values[0] != GL_FLOAT && values[0] != GL_FLOAT_VEC2 && values[0] != GL_FLOAT_VEC3 && values[0] != GL_FLOAT_VEC4)) return false;
-        // Keep programs with shader side effects unchanged. Storage blocks and
-        // atomic-counter buffers in any stage also require extra layout handling.
         for (GLenum kind : {GL_SHADER_STORAGE_BLOCK, GL_ATOMIC_COUNTER_BUFFER})
         { f.GetProgramInterfaceiv(program,kind,GL_ACTIVE_RESOURCES,&count); if (count) return false; }
         f.GetProgramInterfaceiv(program,GL_UNIFORM,GL_ACTIVE_RESOURCES,&count);
@@ -387,7 +385,7 @@ namespace ShaderToggler::smart::other::gl
         {
             const GLenum p[]{GL_REFERENCED_BY_FRAGMENT_SHADER,GL_TYPE}; GLint v[2]{};
             f.GetProgramResourceiv(program,GL_UNIFORM,i,2,p,2,nullptr,v);
-            if (v[0] && !uniformType(v[1])) return false; // Images, atomic counters, opaque extensions.
+            if (v[0] && !uniformType(v[1])) return false;
         }
         f.GetProgramiv(program,GL_TRANSFORM_FEEDBACK_VARYINGS,&count);
         return count == 0;
@@ -409,7 +407,7 @@ namespace ShaderToggler::smart::other::gl
             if (a[3] >= 0)
             {
                 if (b[3] < 0 || !std::equal(a+4,a+8,b+4)) return false;
-                continue; // Buffer data stays bound; offsets and strides must match.
+                continue;
             }
             if (a[2] < 0) return false;
             for (GLint element=0; element<a[1]; ++element)
@@ -445,7 +443,6 @@ namespace ShaderToggler::smart::other::gl
             if (source.code.find("bindless_texture") != std::string::npos)
             { result.reason="OpenGL bindless uniforms are unsupported; original pass retained."; return result; }
         if (!inspect(f,original)) { result.reason="OpenGL shader outputs or side effects are unsupported; original pass retained."; return result; }
-        // uintBitsToFloat preserves the custom colour exactly, independent of locale.
         const auto bits=modern::colourKey(choice);
         const std::string colour="#version 430 core\nlayout(location=0) out vec4 staColour;\nvoid main(){staColour=uintBitsToFloat(uvec4("+
             std::to_string(bits[0])+"u,"+std::to_string(bits[1])+"u,"+std::to_string(bits[2])+"u,"+std::to_string(bits[3])+"u));}\n";
@@ -509,7 +506,6 @@ namespace ShaderToggler::smart::other::gl
         unregisterNative(cmd);
         auto& c=cmd->get_private_data<Context>();
         if(c.ready && c.native==wglGetCurrentContext()) for(auto& [p,cache]:c.cache) clear(c,cache);
-        // Otherwise GL owns the objects until the context/share group is destroyed.
         cmd->destroy_private_data<Context>();
     }
     void forget(device* dev,uint64_t handle)
@@ -610,9 +606,6 @@ namespace ShaderToggler::smart::other::gl
     }
     Status status(device* dev,uint32_t hash) { auto& d=dev->get_private_data<DeviceData>();std::lock_guard lock(d.mutex);auto i=d.statuses.find(hash);return i==d.statuses.end()?Status{}:i->second; }
     Method suggestion(device* dev,uint32_t hash) { auto& d=dev->get_private_data<DeviceData>();std::lock_guard lock(d.mutex);auto i=d.suggestions.find(hash);return i==d.suggestions.end()?Method::TransparentBlack:i->second; }
-    // Native scopes preserve complete multi-draw batches, primitive modes,
-    // client index pointers, gl_DrawID and indirect count buffers. The ReShade
-    // callback installs a colour only while one of these scopes is active.
     std::recursive_mutex nativeMutex;
     std::map<HGLRC,command_list*> nativeContexts;
     std::map<void*,void*> nativeOriginals;
@@ -846,7 +839,7 @@ namespace ShaderToggler::smart::other::gl
             if(!begin(cmd,handle,hash,choice,currentDraw->token))return false;
             currentDraw->hash=hash;currentDraw->choice=choice;return true;
         }
-        registerNative(cmd); // If initialization preceded wglMakeCurrent, the next draw can use the scope.
+        registerNative(cmd);
         auto& d=cmd->get_device()->get_private_data<DeviceData>();std::lock_guard lock(d.mutex);
         report(d,hash,choice,false,"OpenGL native draw capture is unavailable for this call; original pass retained.");return false;
     }

@@ -19,8 +19,6 @@ namespace ShaderToggler::ini_save
         uint32_t error=0;
     };
 
-    // File operations are injected so failures can be exercised without touching
-    // a user's configuration. Both temporary files belong to this save only.
     template<class Files> struct TemporaryFile
     {
         Files& files;
@@ -69,7 +67,6 @@ namespace ShaderToggler::ini_save
         }
         catch(...)
         {
-            // Never unwind into a ReShade callback or retry by truncating the live INI.
             result.saved=false;
         }
         return result;
@@ -132,8 +129,6 @@ namespace ShaderToggler::ini_save
         bool replace(const std::filesystem::path& from,const std::filesystem::path& to,uint32_t& error)
         {
             const auto source=from.wstring(),target=to.wstring();
-            // Sibling paths keep this a rename on the same volume. Never fall back
-            // to deleting the destination or copying over its live contents.
             if(MoveFileExW(source.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {error=0;return true;}
             error=GetLastError();return false;
         }

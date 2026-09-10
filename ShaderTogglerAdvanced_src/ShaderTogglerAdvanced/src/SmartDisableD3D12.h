@@ -76,8 +76,6 @@ namespace ShaderToggler::smart::dx12
     inline ID3D12Device* native(device* dev) { return reinterpret_cast<ID3D12Device*>(static_cast<uintptr_t>(dev->get_native())); }
     inline ID3D12GraphicsCommandList* native(command_list* cmd) { return reinterpret_cast<ID3D12GraphicsCommandList*>(static_cast<uintptr_t>(cmd->get_native())); }
     inline State& state(device* dev) { return *dev->get_private_data<DeviceData>().state; }
-    // Implemented in SmartDisableD3D12Hooks.cpp. Native descriptions retain
-    // settings that ReShade's API 2 pipeline conversion does not expose.
     void installCapture(device* dev, const std::shared_ptr<State>& value);
     void removeCapture(device* dev);
     void shutdownCapture(bool processExit);
@@ -200,7 +198,6 @@ namespace ShaderToggler::smart::dx12
         if (!s.dxcTried)
         {
             s.dxcTried = true;
-            // Reuse a loaded compiler or the game's/system's installed compiler.
             if (!GetModuleHandleExW(0, L"dxcompiler.dll", &s.dxcModule))
                 s.dxcModule = LoadLibraryExW(L"dxcompiler.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (s.dxcModule)
@@ -257,8 +254,6 @@ namespace ShaderToggler::smart::dx12
     }
     inline bool isDxil(const std::vector<uint8_t>& code)
     {
-        // Both formats use a DXBC container. Identify the actual DXIL chunk,
-        // rather than treating every failed legacy reflection as DXIL.
         if (code.size() < 32 || std::memcmp(code.data(), "DXBC", 4)) return false;
         const auto word = [&](size_t offset) { uint32_t value; std::memcpy(&value, code.data() + offset, 4); return value; };
         const size_t count = word(28);
@@ -495,9 +490,6 @@ namespace ShaderToggler::smart::dx12
             if ((outputs & data.targetMask) != outputs)
                 return "A colour target required by this shader is missing from the observed bindings; original pass retained.";
         }
-        // Missing binding events do not erase the native PSO's formats and the
-        // reflected shader's output layout. A replacement uses that same layout,
-        // and never binds, clears or transitions any render-target resources.
         for (UINT slot = 0; slot < p.desc.NumRenderTargets; ++slot)
         {
             const auto& b = p.desc.BlendState.RenderTarget[p.desc.BlendState.IndependentBlendEnable ? slot : 0];
@@ -511,8 +503,6 @@ namespace ShaderToggler::smart::dx12
     {
         auto desc = p.desc;
         desc.PS = {code.data(), code.size()};
-        // Preserve the effective per-target blend settings, and never add writes
-        // to channels or unused target slots that the original shader did not write.
         for (UINT slot = 0; slot < 8; ++slot)
         {
             auto& b = desc.BlendState.RenderTarget[slot];

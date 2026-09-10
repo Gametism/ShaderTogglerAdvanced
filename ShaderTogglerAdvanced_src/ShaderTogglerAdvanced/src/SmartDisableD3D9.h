@@ -58,9 +58,7 @@ namespace ShaderToggler::smart
             diagnostics::Write("[SMART] Native DirectX 9 replacement available; render_targets=%lu", state.renderTargets);
         }
     }
-    // Replacement objects remain unique per original shader. State blocks or
-    // GetPixelShader/SetPixelShader round trips may capture one of our objects;
-    // the reverse map recovers the real game shader even after a toggle changes.
+
     inline IDirect3DPixelShader9* originalOf(DeviceData& state, IDirect3DPixelShader9* shader)
     {
         const auto found = state.originals.find(shader);
@@ -97,7 +95,6 @@ namespace ShaderToggler::smart
     inline void present(reshade::api::command_queue* queue, reshade::api::swapchain*,
         const reshade::api::rect*, const reshade::api::rect*, uint32_t, const reshade::api::rect*)
     {
-        // Before ReShade captures game state and starts its effects/overlay.
         if (queue) restore(queue->get_device());
     }
     inline uint64_t pixelHandle(reshade::api::command_list* commands, uint64_t tracked)
@@ -128,8 +125,6 @@ namespace ShaderToggler::smart
             SUCCEEDED(d3d->GetRenderState(D3DRS_DESTBLEND, &destination)) &&
             SUCCEEDED(d3d->GetRenderState(D3DRS_BLENDOP, &operation)) && operation == D3DBLENDOP_ADD)
         {
-            // Hints only: source*destination colour is often a multiplicative
-            // pass; source-alpha blending often needs alpha=1 to overwrite.
             if ((source == D3DBLEND_DESTCOLOR && destination == D3DBLEND_ZERO) ||
                 (source == D3DBLEND_ZERO && destination == D3DBLEND_SRCCOLOR)) suggested = Method::White;
             else if (source == D3DBLEND_SRCALPHA && destination == D3DBLEND_INVSRCALPHA) suggested = Method::OpaqueBlack;
@@ -201,8 +196,6 @@ namespace ShaderToggler::smart
     }
     inline std::array<DWORD, 11> constantShader(DWORD version, const Choice& choice)
     {
-        // ps_2_0 / ps_3_0: def c0, r,g,b,a; mov oC0, c0; end.
-        // DEF embeds constants locally; no game constant registers are changed.
         std::array<DWORD, 11> code = {version, 0x05000051u, 0xA00F0000u,
             0, 0, 0, 0, 0x02000001u, 0x800F0800u, 0xA0E40000u, 0x0000FFFFu};
         for (size_t i = 0; i < 4; ++i) std::memcpy(&code[3 + i], &choice.rgba[i], sizeof(float));

@@ -96,7 +96,6 @@ namespace ShaderToggler::smart::modern
             state.codeBytes -= old->second.code.size();
             state.shaders.erase(old);
         }
-        // Keep memory bounded even in games that generate shaders continuously.
         if (!desc.code || !desc.code_size || desc.code_size > 4 * 1024 * 1024 ||
             state.codeBytes + desc.code_size > 64 * 1024 * 1024 || state.shaders.size() >= 65536) return;
         ShaderInfo info;
@@ -135,7 +134,6 @@ namespace ShaderToggler::smart::modern
     inline bool compatible(ID3D11ShaderReflection* reflection)
     {
         D3D11_SHADER_DESC desc{};
-        // The high word of a shader version token is the stage (pixel = 0).
         if (FAILED(reflection->GetDesc(&desc)) || (desc.Version >> 16) != 0 ||
             desc.OutputParameters != 1) return false;
         D3D11_SIGNATURE_PARAMETER_DESC output{};
@@ -149,7 +147,7 @@ namespace ShaderToggler::smart::modern
             {
             case D3D_SIT_CBUFFER: case D3D_SIT_TBUFFER: case D3D_SIT_TEXTURE:
             case D3D_SIT_SAMPLER: case D3D_SIT_STRUCTURED: case D3D_SIT_BYTEADDRESS: break;
-            default: return false; // UAV writes/atomics and unknown side effects.
+            default: return false; 
             }
         }
         return true;
@@ -177,7 +175,6 @@ namespace ShaderToggler::smart::modern
     inline std::string shaderSource(const Choice& choice)
     {
         const auto key = colourKey(choice);
-        // Bit-exact, locale-independent custom colours; no game constants used.
         return "float4 main() : SV_Target0 { return asfloat(uint4(" + std::to_string(key[0]) + "u," +
             std::to_string(key[1]) + "u," + std::to_string(key[2]) + "u," + std::to_string(key[3]) + "u)); }";
     }
@@ -186,7 +183,7 @@ namespace ShaderToggler::smart::modern
         const auto key = colourKey(choice);
         if (auto found = state.variants.find(key); found != state.variants.end()) return &found->second;
         if (state.variants.size() >= 512) return nullptr;
-        auto& variant = state.variants[key]; // Cache failures too; never compile every draw.
+        auto& variant = state.variants[key];
         const auto source = shaderSource(choice);
         Ref<ID3DBlob> code, errors;
         HRESULT result = state.compile(source.data(), source.size(), "ShaderTogglerAdvanced", nullptr, nullptr,
@@ -208,7 +205,6 @@ namespace ShaderToggler::smart::modern
     }
     template<class T> inline bool singleTarget(T* context)
     {
-        // All returned views hold references, including those in rejected passes.
         using View = std::conditional_t<std::is_same_v<T, ID3D10Device>, ID3D10RenderTargetView, ID3D11RenderTargetView>;
         View* targets[8]{};
         context->OMGetRenderTargets(8, targets, nullptr);
@@ -222,7 +218,6 @@ namespace ShaderToggler::smart::modern
     }
     inline Method blendSuggestion(bool enabled, UINT source, UINT destination, UINT operation)
     {
-        // D3D10 and D3D11 use the same numeric blend factor/operation values.
         if (enabled && operation == D3D11_BLEND_OP_ADD)
         {
             if ((source == D3D11_BLEND_DEST_COLOR && destination == D3D11_BLEND_ZERO) ||
@@ -319,8 +314,6 @@ namespace ShaderToggler::smart::modern
         const auto fail = [&](const char* reason) { report(dev, state, hash, choice, false, reason); return false; };
         if (dev->get_api() == device_api::d3d11)
         {
-            // Deferred contexts do not expose reliable state getters. Leave their
-            // draws untouched rather than guessing targets or class linkage.
             if (context11(commands)->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE)
                 return fail("This pass uses a deferred context; colour replacement is unavailable. Original pass retained.");
             if (native11(dev)->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0)
@@ -358,6 +351,6 @@ namespace ShaderToggler::smart::modern
             issueDraw();
         }
         report(dev, state, hash, choice, true, "Replacement is running.");
-        return true; // Exactly one draw issued; the callback suppresses the original.
+        return true;
     }
 }

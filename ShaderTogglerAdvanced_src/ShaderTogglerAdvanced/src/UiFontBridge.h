@@ -11,9 +11,6 @@
 
 namespace sta_ui
 {
-// Exactly the common public table prefix for ImGui 1.92.2 / 1.92.5.
-// Keep the add-on's normal ImGui 1.86 table for every other UI operation.
-// New ImFont/IO/style objects are opaque: never pass them to the old font API.
 struct ModernIO;
 struct ModernStyle;
 struct ModernDrawList;
@@ -97,9 +94,6 @@ struct ModernFontApi
         int major=0,minor=0,patch=0;
         if(!getTable || !hostVersion || std::sscanf(hostVersion,"%d.%d.%d",&major,&minor,&patch)!=3)
             return result;
-        // ReShade introduced this table with ImGui 1.92.2 (19220, later 19222).
-        // Older hosts still implement SetWindowFontScale; do not query a table
-        // they cannot support. Future hosts can expose this versioned ABI too.
         if(major<1 || (major==1 && (minor<92 || (minor==92 && patch<2)))) return result;
         const uint32_t candidates[]={19250,19222,19220};
         for(uint32_t version:candidates)
@@ -119,13 +113,9 @@ struct ModernFontApi
     bool push(float factor) const
     {
         if(!version) return false;
-        // FontSizeBase is the first float in both public modern styles. Read
-        // it, never modify it (a compatibility style can itself be a snapshot).
         float base=0;
         std::memcpy(&base,&table.GetStyle(),sizeof(base));
         if(!std::isfinite(base) || base<=0 || !std::isfinite(base*factor) || factor<=0) return false;
-        // This retains ReShade's current font, global/DPI/window factors and
-        // lets the host generate correctly sized glyphs. Pop restores all of it.
         table.PushFont(nullptr,base*factor);
         return true;
     }

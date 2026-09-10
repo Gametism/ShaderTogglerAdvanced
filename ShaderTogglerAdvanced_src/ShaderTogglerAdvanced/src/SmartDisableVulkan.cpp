@@ -39,8 +39,6 @@ namespace ShaderToggler::smart::other::vk
         PFN_vkDestroyRenderPass destroyPass=nullptr;
         ~Dependency() { Internal own; if(layout) destroyLayout(device,layout,nullptr); if(pass) destroyPass(device,pass,nullptr); }
     };
-    // Fixed-size extension structures are copied verbatim. Pointer-bearing ones
-    // are owned explicitly; unknown extensions are never silently discarded.
     struct Chain
     {
         std::vector<std::vector<uint64_t>> nodes;
@@ -71,7 +69,7 @@ namespace ShaderToggler::smart::other::vk
                 FIXED(PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO,VkPipelineShaderStageRequiredSubgroupSizeCreateInfo);
                 FIXED(PIPELINE_ROBUSTNESS_CREATE_INFO_EXT,VkPipelineRobustnessCreateInfoEXT);
                 case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO:continue;
-                case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:continue; // Shader bytes are copied separately.
+                case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:continue;
                 default:return false;
                 }
 #undef FIXED
@@ -271,7 +269,6 @@ namespace ShaderToggler::smart::other::vk
     bool compatible(const Stage& stage)
     {
         const auto& words=stage.code->words;
-        // Physical pointers and unknown capabilities may hide writable resources.
         for(size_t i=5;i<words.size();)
         {
             const auto count=words[i]>>16,op=words[i]&65535;
@@ -295,8 +292,6 @@ namespace ShaderToggler::smart::other::vk
         if(!output || output->location!=0 || output->member_count || output->array.dims_count || output->numeric.scalar.width!=32 ||
             (output->decoration_flags&SPV_REFLECT_DECORATION_BUILT_IN) || !output->type_description ||
             !(output->type_description->type_flags&SPV_REFLECT_TYPE_FLAG_FLOAT)) return false;
-        // Reject dual-source/component-decorated outputs. Reflection's basic output
-        // type alone is insufficient for those interfaces.
         for(size_t i=5;i<words.size();i+=words[i]>>16)
             if((words[i]&65535)==SpvOpDecorate && (words[i]>>16)>=4 && words[i+1]==output->spirv_id &&
                 ((words[i+2]==SpvDecorationIndex && words[i+3]!=0) || words[i+2]==SpvDecorationComponent)) return false;
@@ -316,7 +311,6 @@ namespace ShaderToggler::smart::other::vk
     }
     std::vector<uint32_t> colour(Choice choice)
     {
-        // SPIR-V 1.0: one floating-point vec4 at location zero, no resources.
         const auto c=modern::colourKey(choice);
         return {0x07230203,0x00010000,0,15,0,
             (2u<<16)|SpvOpCapability,SpvCapabilityShader,
@@ -351,7 +345,7 @@ namespace ShaderToggler::smart::other::vk
         if(auto i=p->variants.find(key);i!=p->variants.end()) return i->second;
         if(s.retained.size()>=512) return VK_NULL_HANDLE;
         auto& result=p->variants[key];
-        s.retained.emplace_back(VK_NULL_HANDLE,p); // Includes failed attempts in the bound.
+        s.retained.emplace_back(VK_NULL_HANDLE,p);
         Internal own;
         auto stages=p->stageInfos;
         std::vector<VkShaderModule> modules;
@@ -378,9 +372,6 @@ namespace ShaderToggler::smart::other::vk
     }
     template<class Fn> Fn fallback(VkDevice d,const char* name)
     {
-        // A detoured entry point can also be called for devices that ReShade is
-        // not tracking. Resolve their own dispatch chain to avoid redispatching
-        // through the same loader detour indefinitely.
         if(getDeviceProc) if(auto p=getDeviceProc(d,name))
             return reinterpret_cast<Fn>(unhooked(reinterpret_cast<void*>(p)));
         return loader?reinterpret_cast<Fn>(unhooked(reinterpret_cast<void*>(GetProcAddress(loader,name)))):nullptr;
@@ -505,8 +496,6 @@ namespace ShaderToggler::smart::other::vk
                 install(reinterpret_cast<void*>(fn),replacement);
             resolve(*s);
         }
-        // Keep the loader's function pointer stable. An application may cache it
-        // past add-on unload; detours are removable, returned add-on thunks are not.
         return fn;
     }
     bool install(void* target,void* replacement,void** out)
@@ -532,8 +521,6 @@ namespace ShaderToggler::smart::other::vk
         std::lock_guard lock(registryMutex);devices[value->deviceHandle]=value;
         if(!hooksReady)
         {
-            // Do not call loader device-dispatch functions until vkCreateDevice
-            // has returned to the application and the loader has initialized them.
             loader=GetModuleHandleW(L"vulkan-1.dll");
             auto result=MH_Initialize();
             if(!loader || (result!=MH_OK&&result!=MH_ERROR_ALREADY_INITIALIZED))return;
@@ -560,7 +547,6 @@ namespace ShaderToggler::smart::other::vk
         if(!cmd||!isVK(cmd->get_device())||internal())return;
         if((stages&reshade::api::pipeline_stage::pixel_shader)==reshade::api::pipeline_stage::pixel_shader)
         {auto& d=cmd->get_private_data<Commands>();d.graphics=handle;d.restore=0;}
-        // Compute pipeline bindings do not disturb Vulkan's graphics binding.
     }
     void restore(command_list* cmd)
     {
@@ -615,13 +601,12 @@ namespace ShaderToggler::smart::other::vk
         std::vector<std::shared_ptr<State>> live;
         {std::lock_guard lock(registryMutex);for(auto& [handle,s]:devices)live.push_back(s);}
         for(auto& s:live){resolve(*s);if(s->f.DeviceWaitIdle)s->f.DeviceWaitIdle(s->deviceHandle);}
-        // Release Vulkan objects while the original dispatch trampolines exist.
         {std::lock_guard lock(registryMutex);devices.clear();}
         for(auto& s:live)s->owner->destroy_private_data<DeviceData>();live.clear();
         for(auto p:hookTargets)MH_DisableHook(p);
         for(auto p:hookTargets)MH_RemoveHook(p);
         hookTargets.clear();exportOriginals.clear();hooksReady=false;getDeviceProc=nullptr;
         for(auto module:hookModules)FreeLibrary(module);hookModules.clear();loader=nullptr;
-        // DX12 may also own MinHook hooks. Its shutdown runs after this function.
+        
     }
 }

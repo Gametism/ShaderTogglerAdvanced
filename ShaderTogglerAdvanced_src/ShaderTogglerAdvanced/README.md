@@ -12,7 +12,7 @@ Originally created by **Frans "Otis_Inf" Bouma**. Modified and expanded by **Sve
 - [Creating groups](#creating-and-editing-groups), [shader hunting](#shader-hunting) and [Smart disable](#smart-disable).
 - [Refining shared effects](#refine-separate-effects-that-share-shaders) and [standalone Effect Finder](#standalone-effect-finder).
 - [Merging](#merging-groups), [ordering](#reordering-and-sorting), [hotkeys](#hotkeys-and-controller-labels), [activation modes](#activation-modes), [timed controls](#timed-triggers-suppression-and-linger) and [global suspension](#suspend-all-toggle-groups).
-- [Saving](#saving-and-compatibility), [diagnostics](#diagnostic-logging), [troubleshooting](#troubleshooting), [building](#building-from-source) and [licensing](#credits-and-licensing).
+- [Saving](#saving-and-compatibility), [diagnostics](#diagnostic-logging), [troubleshooting](#troubleshooting), [licensing](#credits-and-licensing).
 
 ## Features
 
@@ -542,21 +542,6 @@ The **Help** tab shows the log filename and any logging error.
 | Groups show SUS | Restore globally suspended groups |
 | Text is too small or too large | Use **Size**; Auto targets 32 px at 4K, while manual percentages multiply the current ReShade font |
 | A save fails | Check ShaderTogglerAdvanced.log and whether the game folder permits writing |
-
-## Building from source
-
-On Windows, install Visual Studio's C++ build tools and a Windows SDK, then run **Build_All.bat**.
-
-The script builds:
-
-- **dist/x86/ShaderTogglerAdvanced.addon**
-- **dist/x64/ShaderTogglerAdvanced.addon64**
-
-Each output folder also receives its matching **dxcompiler.dll** and **DXC-LICENSE.txt**. Use the output matching the game executable.
-
-The scripts in **tests** cover shader/finder logic, rendering callback handling, group merging and ordering, configuration persistence, diagnostic logging and graphics-backend behaviour using test fixtures. They use Python 3 and g++. Some shader-compilation checks additionally need DXC, glslang or SPIR-V tools and report when an optional dependency is unavailable.
-
-These checks do not replace testing the compiled add-on in the target game.
 
 ## Credits and licensing
 

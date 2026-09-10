@@ -67,7 +67,7 @@ Both files are written beside the game executable:
 
 Existing ShaderToggler configurations remain supported. Back up the INI before making large changes or testing a new setup.
 
-## Quick start: which tool should I use?
+## Quick start: Which tool should I use?
 
 | Situation | Tool |
 | --- | --- |

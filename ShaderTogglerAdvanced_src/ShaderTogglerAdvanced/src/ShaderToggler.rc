@@ -1,0 +1,62 @@
+#include "resource.h"
+#define APSTUDIO_READONLY_SYMBOLS 
+#include "winres.h"
+#undef APSTUDIO_READONLY_SYMBOLS
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#ifdef APSTUDIO_INVOKED
+1 TEXTINCLUDE
+BEGIN
+    "resource.h\0"
+END
+2 TEXTINCLUDE
+BEGIN
+    "#include ""winres.h""\r\n"
+    "\0"
+END
+3 TEXTINCLUDE
+BEGIN
+    "\r\n"
+    "\0"
+END
+#endif
+#endif
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENG)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_UK
+#pragma code_page(1252)
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,5,0,0
+ PRODUCTVERSION 1,5,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x2L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040004b0"
+        BEGIN
+            VALUE "CompanyName", "Frans 'Otis_Inf' Bouma | Sven 'Gametism' Koenigsmann"
+            VALUE "FileDescription", "Shader Toggler Advanced Add-on for ReShade 5+"
+            VALUE "FileVersion", "1.5.0.0"
+            VALUE "InternalName", "ShaderTo.dll"
+            VALUE "LegalCopyright", "Copyright (C) 2023 Frans Bouma | Modifications Copyright (c) 2026 Sven Koenigsmann (Gametism)"
+            VALUE "OriginalFilename", "ShaderTo.dll"
+            VALUE "ProductName", "Shader Toggler Advanced"
+            VALUE "ProductVersion", "1.5.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x400, 1200
+    END
+END
+#endif
+#ifndef APSTUDIO_INVOKED
+#endif

@@ -46,7 +46,7 @@ Use **ReShade 5.1 or newer with full Add-on support**, installed for the game.
 
 1. Close the game.
 2. Place the matching add-on in the folder containing the actual game executable.
-3. For DXIL Smart disable support, also place the matching **dxcompiler.dll** there. The build script supplies it beside each built add-on.
+3. For DXIL Smart disable support, also place the matching **dxcompiler.dll** there.
 4. Keep your existing **ShaderToggler.ini**.
 5. Start the game, open ReShade and select **Add-ons → Shader Toggler Advanced**.
 

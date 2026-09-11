@@ -1,0 +1,15 @@
+ShaderToggler Advanced - New Modifications
+Copyright (c) 2026 Sven "Gametism" Königsmann. All Rights Reserved.
+
+The new modifications supplied in this update are proprietary. Use of the mod
+as supplied is permitted. Without prior written permission from Sven
+"Gametism" Königsmann, copying, reuse, modification, redistribution, mirroring,
+creation or distribution of derivative works, and AI-assisted reuse of these
+modifications or their source code are prohibited.
+
+This notice is also embedded as an exported persistent string in compiled
+add-on, DLL, or ASI binaries built from this source.
+
+Original work, previously supplied code, and third-party components retain
+their existing copyright and license notices. This notice does not replace
+or restrict the licenses applicable to those components.
